@@ -44,11 +44,6 @@
 	"dependencies": {
 		"mcporter": "^0.7.3"
 	},
-	"peerDependencies": {
-		"@mariozechner/pi-ai": "*",
-		"@mariozechner/pi-coding-agent": "*",
-		"@sinclair/typebox": "*"
-	},
 	"devDependencies": {
 		"@types/node": "^24.3.0",
 		"typescript": "^5.9.3",
