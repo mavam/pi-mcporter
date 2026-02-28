@@ -4,7 +4,7 @@
 	"description": "Single-tool MCPorter bridge extension for pi and Model Context Protocol (MCP) servers.",
 	"type": "module",
 	"files": [
-		"src",
+		"dist",
 		"README.md",
 		"LICENSE"
 	],
@@ -33,10 +33,13 @@
 	},
 	"pi": {
 		"extensions": [
-			"./src/index.ts"
+			"./dist/index.js"
 		]
 	},
 	"scripts": {
+		"build": "rm -rf dist && esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js --external:mcporter --external:@mariozechner/pi-coding-agent --external:@mariozechner/pi-ai --external:@sinclair/typebox",
+		"prepare": "npm run build",
+		"prepack": "npm run build",
 		"check": "tsc --noEmit",
 		"test": "vitest run",
 		"test:watch": "vitest"
@@ -45,7 +48,11 @@
 		"mcporter": "^0.7.3"
 	},
 	"devDependencies": {
+		"@mariozechner/pi-ai": "*",
+		"@mariozechner/pi-coding-agent": "*",
+		"@sinclair/typebox": "*",
 		"@types/node": "^24.3.0",
+		"esbuild": "^0.25.10",
 		"typescript": "^5.9.3",
 		"vitest": "^4.0.18"
 	}
