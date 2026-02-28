@@ -1,0 +1,10 @@
+export const CATALOG_TTL_MS = 5 * 60 * 1000;
+
+export const DEFAULT_SEARCH_LIMIT = 20;
+export const MAX_SEARCH_LIMIT = 100;
+
+export const DEFAULT_CALL_TIMEOUT_MS = 30_000;
+export const MAX_CALL_TIMEOUT_MS = 5 * 60 * 1000;
+
+export const SCHEMA_SNIPPET_MAX_BYTES = 12 * 1024;
+export const SCHEMA_SNIPPET_MAX_LINES = 350;

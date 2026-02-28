@@ -1,0 +1,57 @@
+{
+	"name": "@mavam/pi-mcporter",
+	"version": "0.1.0",
+	"description": "Single-tool MCPorter bridge extension for pi and Model Context Protocol (MCP) servers.",
+	"type": "module",
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"coding-agent",
+		"mcp",
+		"model-context-protocol",
+		"mcp-server",
+		"mcp-tools",
+		"mcp-proxy",
+		"mcporter"
+	],
+	"author": "mavam",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mavam/pi-mcporter.git"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"scripts": {
+		"check": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"dependencies": {
+		"mcporter": "^0.7.3"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-ai": "*",
+		"@mariozechner/pi-coding-agent": "*",
+		"@sinclair/typebox": "*"
+	},
+	"devDependencies": {
+		"@types/node": "^24.3.0",
+		"typescript": "^5.9.3",
+		"vitest": "^4.0.18"
+	}
+}
