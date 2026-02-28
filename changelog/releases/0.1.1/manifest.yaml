@@ -1,0 +1,5 @@
+created: 2026-02-28
+title: Pi MCPorter 0.1.1
+intro: >-
+  Fixes a slow startup caused by npm auto-installing peer dependencies that pi already
+  provides at runtime.

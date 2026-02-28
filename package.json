@@ -1,6 +1,6 @@
 {
 	"name": "@mavam/pi-mcporter",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Single-tool MCPorter bridge extension for pi and Model Context Protocol (MCP) servers.",
 	"type": "module",
 	"files": [
