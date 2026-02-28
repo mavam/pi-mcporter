@@ -1,0 +1,5 @@
+created: 2026-02-28
+title: Pi MCPorter 0.1.3
+intro: >-
+  This release renames the npm package to pi-mcporter and updates install instructions
+  to use the unscoped package name.

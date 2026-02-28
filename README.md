@@ -30,13 +30,13 @@ npx mcporter list          # verify your servers are visible
 Install as a pi package:
 
 ```bash
-pi install npm:@mavam/pi-mcporter
+pi install npm:pi-mcporter
 ```
 
 Try it once without installing:
 
 ```bash
-pi -e npm:@mavam/pi-mcporter
+pi -e npm:pi-mcporter
 ```
 
 ## 🚀 Quick start
