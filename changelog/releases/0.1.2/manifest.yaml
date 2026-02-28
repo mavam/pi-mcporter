@@ -1,0 +1,5 @@
+created: 2026-02-28
+title: Pi MCPorter 0.1.2
+intro: >-
+  This release improves startup performance by shipping and loading a precompiled
+  extension bundle instead of transpiling TypeScript at runtime.
