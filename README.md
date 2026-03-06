@@ -76,6 +76,26 @@ Tool name: `mcporter`
 - `--mcporter-config <path>`: explicit MCPorter config path (overrides `MCPORTER_CONFIG` env var and default locations)
 - `--mcporter-timeout-ms <ms>`: default call timeout in milliseconds (default `30000`)
 
+## 🪄 Slash command
+
+Use `/mcporter` to control how successful `action="call"` results render in pi:
+
+- `summary` (default): collapsed view shows a compact summary, expanded view shows the full tool output
+- `full`: always show the full rendered tool output
+- `off`: hide the rendered tool output entirely
+
+Command forms:
+
+- `/mcporter`: open the settings UI
+- `/mcporter status`: show the current global value
+- `/mcporter full|summary|off`: set the global mode
+
+Config file:
+
+- Global: `~/.pi/agent/mcporter.json`
+
+When the file does not set `callOutputMode`, mcporter uses `summary`.
+
 ## 🧯 Troubleshooting
 
 - **Unknown server/tool**: run `npx mcporter list` and `npx mcporter list <server>` to verify names.

@@ -1,5 +1,8 @@
 import type { TruncationResult } from "@mariozechner/pi-coding-agent";
 
+export type McporterCallOutputMode = "full" | "summary" | "off";
+export type McporterCallOutputKind = "text" | "structured" | "json" | "raw";
+
 export interface CatalogTool {
 	server: string;
 	tool: string;
@@ -31,6 +34,8 @@ export interface ToolDetails {
 	warnings?: string[];
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
+	callOutputKind?: McporterCallOutputKind;
+	callOutputSummary?: string;
 }
 
 export interface ParsedSelector {

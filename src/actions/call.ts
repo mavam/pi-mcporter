@@ -12,7 +12,11 @@ import {
 	parseSelector,
 	validateServer,
 } from "../inputs.js";
-import { formatCallOutput, shapeCallOutput } from "../output.js";
+import {
+	formatCallOutput,
+	shapeCallOutput,
+	summarizeCallOutput,
+} from "../output.js";
 import type { McporterParams } from "../parameters.js";
 import type { CatalogTool, ToolDetails } from "../types.js";
 
@@ -87,8 +91,13 @@ export async function handleCallAction(
 		throw new Error(lines.join("\n"));
 	}
 
-	const text = formatCallOutput(parsed.raw, rawResult);
-	const shaped = await shapeCallOutput(text);
+	const formatted = formatCallOutput(parsed.raw, rawResult);
+	const shaped = await shapeCallOutput(formatted.text);
+	const callOutputSummary = summarizeCallOutput(
+		parsed.raw,
+		formatted.kind,
+		Boolean(shaped.truncation?.truncated),
+	);
 
 	return {
 		content: textContent(shaped.text),
@@ -98,6 +107,8 @@ export async function handleCallAction(
 			timeoutMs,
 			truncation: shaped.truncation,
 			fullOutputPath: shaped.fullOutputPath,
+			callOutputKind: formatted.kind,
+			callOutputSummary,
 		} satisfies ToolDetails,
 	};
 }

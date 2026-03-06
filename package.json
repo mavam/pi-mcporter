@@ -37,7 +37,7 @@
 		]
 	},
 	"scripts": {
-		"build": "rm -rf dist && esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js --external:mcporter --external:@mariozechner/pi-coding-agent --external:@mariozechner/pi-ai --external:@sinclair/typebox",
+		"build": "rm -rf dist && esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js --external:mcporter --external:@mariozechner/pi-coding-agent --external:@mariozechner/pi-ai --external:@mariozechner/pi-tui --external:@sinclair/typebox",
 		"prepare": "npm run build",
 		"prepack": "npm run build",
 		"check": "tsc --noEmit",
