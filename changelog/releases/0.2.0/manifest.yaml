@@ -1,0 +1,8 @@
+created: 2026-03-07
+title: Pi-native tool output expansion
+intro: >-
+  This release makes Pi MCPorter feel native in pi by using pi's built-in tool output
+  expand and collapse behavior, so you can inspect search, describe, and call results
+  with the standard Ctrl+O workflow. It also adds compact call argument previews in
+  tool headers, making it easier to verify inputs at a glance before expanding full
+  output.
