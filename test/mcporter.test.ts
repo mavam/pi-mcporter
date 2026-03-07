@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import mcporterExtension from "../src/index.ts";
+import mcporterExtension, { __test__ } from "../src/index.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
 
 describe("mcporter renderer", () => {
@@ -116,6 +116,41 @@ describe("mcporter renderer", () => {
     expect(collapsed).not.toContain("full output");
     expect(expanded).toContain("full output");
   });
+
+  it("shows compact call args in the call header", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: { team: "PI", limit: 10, state: "Todo" },
+        },
+        createTheme(),
+      ),
+    );
+
+    expect(rendered).toContain("mcporter call linear.list_issues");
+    expect(rendered).toContain('{"team":"PI","limit":10,"state":"Todo"}');
+  });
+
+  it("omits empty call args from the call header", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: {},
+        },
+        createTheme(),
+      ),
+    );
+
+    expect(rendered).toBe("mcporter call linear.list_issues");
+  });
 });
 
 describe("call output formatting", () => {
@@ -160,8 +195,37 @@ describe("call output formatting", () => {
   });
 });
 
+describe("call args preview formatting", () => {
+  it("formats argsJson as compact single-line JSON", () => {
+    expect(
+      __test__.formatCallArgsPreview({
+        action: "call",
+        selector: "demo.echo",
+        argsJson: '{\n  "team": "PI",\n  "limit": 10\n}',
+      }),
+    ).toBe('{"team":"PI","limit":10}');
+  });
+
+  it("truncates long args previews", () => {
+    expect(
+      __test__.formatCallArgsPreview({
+        action: "call",
+        selector: "demo.echo",
+        args: {
+          query:
+            "this is a deliberately long string that should be truncated",
+        },
+      }),
+    ).toBe('{"query":"this is a deliberately long st...');
+  });
+});
+
 function createExtensionHarness(): {
   tool: {
+    renderCall: (
+      args: unknown,
+      theme: ReturnType<typeof createTheme>,
+    ) => { render: (width: number) => string[] };
     renderResult: (
       result: unknown,
       options: { expanded: boolean; isPartial: boolean },
@@ -171,6 +235,10 @@ function createExtensionHarness(): {
 } {
   let tool:
     | {
+        renderCall: (
+          args: unknown,
+          theme: ReturnType<typeof createTheme>,
+        ) => { render: (width: number) => string[] };
         renderResult: (
           result: unknown,
           options: { expanded: boolean; isPartial: boolean },

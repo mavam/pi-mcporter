@@ -31,6 +31,8 @@ const PACKAGE_VERSION: string = await readFile(
   .then((raw) => (JSON.parse(raw) as { version: string }).version)
   .catch(() => "0.0.0-dev");
 
+const CALL_ARGS_PREVIEW_MAX_CHARS = 40;
+
 export default function mcporterExtension(pi: ExtensionAPI) {
   let runtime: Runtime | undefined;
   let runtimePromise: Promise<Runtime> | undefined;
@@ -151,6 +153,13 @@ export default function mcporterExtension(pi: ExtensionAPI) {
         args.query.trim().length > 0
       ) {
         text += ` ${theme.fg("muted", `"${cleanSingleLine(args.query).slice(0, 80)}"`)}`;
+      }
+
+      if (args.action === "call") {
+        const callArgsPreview = formatCallArgsPreview(args as McporterParams);
+        if (callArgsPreview) {
+          text += ` ${theme.fg("muted", callArgsPreview)}`;
+        }
       }
 
       return new Text(text, 0, 0);
@@ -321,8 +330,34 @@ function getExpandHint(): string {
   }
 }
 
+function formatCallArgsPreview(params: McporterParams): string | undefined {
+  const argsResult = parseCallArgs(params);
+  if ("error" in argsResult) {
+    return undefined;
+  }
+
+  if (Object.keys(argsResult.args).length === 0) {
+    return undefined;
+  }
+
+  try {
+    const serialized = JSON.stringify(argsResult.args);
+    if (!serialized) {
+      return undefined;
+    }
+    const singleLine = cleanSingleLine(serialized);
+    if (singleLine.length <= CALL_ARGS_PREVIEW_MAX_CHARS) {
+      return singleLine;
+    }
+    return `${singleLine.slice(0, CALL_ARGS_PREVIEW_MAX_CHARS)}...`;
+  } catch {
+    return undefined;
+  }
+}
+
 export const __test__ = {
   clampLimit,
+  formatCallArgsPreview,
   levenshtein,
   parseCallArgs,
   parseSelector,
