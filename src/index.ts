@@ -6,7 +6,12 @@ import {
   formatSize,
   keyHint,
 } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import {
+  Text,
+  truncateToWidth,
+  type Component,
+  visibleWidth,
+} from "@mariozechner/pi-tui";
 import { createRuntime, type Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
@@ -138,31 +143,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     },
 
     renderCall(args, theme) {
-      let text = theme.fg("toolTitle", theme.bold("mcporter"));
-      text += ` ${theme.fg("accent", args.action)}`;
-
-      if (
-        (args.action === "describe" || args.action === "call") &&
-        typeof args.selector === "string" &&
-        args.selector.trim().length > 0
-      ) {
-        text += ` ${theme.fg("muted", args.selector.trim())}`;
-      } else if (
-        args.action === "search" &&
-        typeof args.query === "string" &&
-        args.query.trim().length > 0
-      ) {
-        text += ` ${theme.fg("muted", `"${cleanSingleLine(args.query).slice(0, 80)}"`)}`;
-      }
-
-      if (args.action === "call") {
-        const callArgsPreview = formatCallArgsPreview(args as McporterParams);
-        if (callArgsPreview) {
-          text += ` ${theme.fg("muted", callArgsPreview)}`;
-        }
-      }
-
-      return new Text(text, 0, 0);
+      return renderCallHeader(args as McporterParams, theme);
     },
 
     renderResult(result, { expanded, isPartial }, theme) {
@@ -330,6 +311,98 @@ function getExpandHint(): string {
   }
 }
 
+function renderCallHeader(params: McporterParams, theme: Theme): Component {
+  return {
+    invalidate() {},
+    render(width) {
+      let header = theme.fg("toolTitle", theme.bold("mcporter"));
+      header += ` ${theme.fg("accent", params.action)}`;
+
+      if (
+        (params.action === "describe" || params.action === "call") &&
+        typeof params.selector === "string" &&
+        params.selector.trim().length > 0
+      ) {
+        header += ` ${theme.fg("muted", params.selector.trim())}`;
+      } else if (
+        params.action === "search" &&
+        typeof params.query === "string" &&
+        params.query.trim().length > 0
+      ) {
+        header += ` ${theme.fg("muted", `"${cleanSingleLine(params.query).slice(0, 80)}"`)}`;
+      }
+
+      const lines: string[] = [];
+      const headerLine = truncateToWidth(header, width);
+      lines.push(
+        headerLine + " ".repeat(Math.max(0, width - visibleWidth(headerLine))),
+      );
+
+      if (params.action === "call") {
+        const previewWidth = Math.max(0, width - 2);
+        const callArgsPreview = formatCallArgsPreview(params, previewWidth);
+        if (callArgsPreview) {
+          const previewLine = truncateToWidth(
+            `  ${theme.fg("muted", callArgsPreview)}`,
+            width,
+          );
+          lines.push(
+            previewLine +
+              " ".repeat(Math.max(0, width - visibleWidth(previewLine))),
+          );
+        }
+      }
+
+      return lines;
+    },
+  };
+}
+
+function isBarePreviewToken(value: string): boolean {
+  return /^[A-Za-z0-9._:/@-]+$/.test(value);
+}
+
+function formatPreviewString(value: string, maxChars: number): string {
+  if (value.length > 0 && isBarePreviewToken(value)) {
+    if (value.length <= maxChars) {
+      return value;
+    }
+    return `${value.slice(0, maxChars)}...`;
+  }
+  return formatJsonValuePreview(value, maxChars);
+}
+
+function formatPreviewKey(key: string, maxChars: number): string {
+  if (key.length > 0 && isBarePreviewToken(key)) {
+    if (key.length <= maxChars) {
+      return key;
+    }
+    return `${key.slice(0, maxChars)}...`;
+  }
+  return formatJsonValuePreview(key, maxChars);
+}
+
+function formatPreviewValue(value: unknown, maxChars: number): string {
+  if (value === null) {
+    return "null";
+  }
+
+  switch (typeof value) {
+    case "string":
+      return formatPreviewString(value, maxChars);
+    case "number":
+      return Number.isFinite(value) ? String(value) : "null";
+    case "boolean":
+      return value ? "true" : "false";
+    case "bigint":
+      return "null";
+    case "object":
+      return formatJsonValuePreview(value, maxChars);
+    default:
+      return "null";
+  }
+}
+
 function appendEscapedJsonString(
   value: string,
   parts: string[],
@@ -482,10 +555,7 @@ function appendPreviewText(
   output.length += text.length;
 }
 
-function formatArgsObjectPreview(
-  value: Record<string, unknown>,
-  maxChars: number,
-): string {
+function formatJsonValuePreview(value: unknown, maxChars: number): string {
   const parts: string[] = [];
   const output = { length: 0, truncated: false };
   appendJsonValuePreview(value, parts, output, maxChars);
@@ -497,6 +567,52 @@ function formatArgsObjectPreview(
     return `${preview.slice(0, maxChars)}...`;
   }
   return preview;
+}
+
+function formatArgsObjectKeyValuePreview(
+  value: Record<string, unknown>,
+  maxChars: number,
+): string | undefined {
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  const parts: string[] = [];
+  const output = { length: 0, truncated: false };
+  for (let index = 0; index < entries.length; index += 1) {
+    const [key, entryValue] = entries[index];
+    if (index > 0) {
+      appendPreviewText(" ", parts, output, maxChars);
+    }
+    appendPreviewText(formatPreviewKey(key, maxChars), parts, output, maxChars);
+    appendPreviewText("=", parts, output, maxChars);
+    appendPreviewText(
+      formatPreviewValue(entryValue, maxChars),
+      parts,
+      output,
+      maxChars,
+    );
+    if (output.truncated) {
+      break;
+    }
+  }
+
+  const preview = parts.join("");
+  if (preview.length === 0) {
+    return undefined;
+  }
+  if (output.truncated || preview.length > maxChars) {
+    return `${preview.slice(0, maxChars)}...`;
+  }
+  return preview;
+}
+
+function formatArgsObjectPreview(
+  value: Record<string, unknown>,
+  maxChars: number,
+): string {
+  return formatJsonValuePreview(value, maxChars);
 }
 
 function formatArgsJsonPreview(
@@ -559,7 +675,192 @@ function formatArgsJsonPreview(
   return preview;
 }
 
-function formatCallArgsPreview(params: McporterParams): string | undefined {
+function skipJsonWhitespace(raw: string, start: number): number {
+  let index = start;
+  while (index < raw.length && /\s/.test(raw[index] ?? "")) {
+    index += 1;
+  }
+  return index;
+}
+
+function scanJsonString(raw: string, start: number): number | undefined {
+  if (raw[start] !== '"') {
+    return undefined;
+  }
+
+  let index = start + 1;
+  let escaping = false;
+  while (index < raw.length) {
+    const char = raw[index];
+    if (escaping) {
+      escaping = false;
+    } else if (char === "\\") {
+      escaping = true;
+    } else if (char === '"') {
+      return index + 1;
+    }
+    index += 1;
+  }
+  return undefined;
+}
+
+function scanJsonValue(raw: string, start: number): number | undefined {
+  let index = start;
+  let objectDepth = 0;
+  let arrayDepth = 0;
+  let inString = false;
+  let escaping = false;
+
+  while (index < raw.length) {
+    const char = raw[index];
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === "\\") {
+        escaping = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      index += 1;
+      continue;
+    }
+    if (char === "{") {
+      objectDepth += 1;
+      index += 1;
+      continue;
+    }
+    if (char === "}") {
+      if (objectDepth === 0 && arrayDepth === 0) {
+        return index;
+      }
+      objectDepth -= 1;
+      index += 1;
+      continue;
+    }
+    if (char === "[") {
+      arrayDepth += 1;
+      index += 1;
+      continue;
+    }
+    if (char === "]") {
+      arrayDepth -= 1;
+      index += 1;
+      continue;
+    }
+    if (char === "," && objectDepth === 0 && arrayDepth === 0) {
+      return index;
+    }
+    index += 1;
+  }
+
+  return index;
+}
+
+function formatRawJsonValuePreview(rawValue: string, maxChars: number): string {
+  if (rawValue.startsWith('"')) {
+    try {
+      return formatPreviewString(JSON.parse(rawValue) as string, maxChars);
+    } catch {
+      return formatArgsJsonPreview(rawValue, maxChars) ?? rawValue;
+    }
+  }
+
+  return formatArgsJsonPreview(rawValue, maxChars) ?? rawValue;
+}
+
+function formatArgsJsonKeyValuePreview(
+  raw: string,
+  maxChars: number,
+): string | undefined {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed === "{}" || !trimmed.startsWith("{")) {
+    return undefined;
+  }
+
+  const parts: string[] = [];
+  const output = { length: 0, truncated: false };
+  let index = skipJsonWhitespace(trimmed, 1);
+  let pairCount = 0;
+
+  while (index < trimmed.length && trimmed[index] !== "}") {
+    const keyEnd = scanJsonString(trimmed, index);
+    if (keyEnd === undefined) {
+      return undefined;
+    }
+
+    const rawKey = trimmed.slice(index, keyEnd);
+    let key: string;
+    try {
+      key = JSON.parse(rawKey) as string;
+    } catch {
+      return undefined;
+    }
+
+    index = skipJsonWhitespace(trimmed, keyEnd);
+    if (trimmed[index] !== ":") {
+      return undefined;
+    }
+
+    index = skipJsonWhitespace(trimmed, index + 1);
+    const valueEnd = scanJsonValue(trimmed, index);
+    if (valueEnd === undefined) {
+      return undefined;
+    }
+
+    if (pairCount > 0) {
+      appendPreviewText(" ", parts, output, maxChars);
+    }
+    appendPreviewText(formatPreviewKey(key, maxChars), parts, output, maxChars);
+    appendPreviewText("=", parts, output, maxChars);
+    appendPreviewText(
+      formatRawJsonValuePreview(
+        trimmed.slice(index, valueEnd).trim(),
+        maxChars,
+      ),
+      parts,
+      output,
+      maxChars,
+    );
+    pairCount += 1;
+    if (output.truncated) {
+      break;
+    }
+
+    index = skipJsonWhitespace(trimmed, valueEnd);
+    if (trimmed[index] === ",") {
+      index = skipJsonWhitespace(trimmed, index + 1);
+      continue;
+    }
+    if (trimmed[index] === "}") {
+      break;
+    }
+    return undefined;
+  }
+
+  const preview = parts.join("");
+  if (preview.length === 0) {
+    return undefined;
+  }
+  if (output.truncated || preview.length > maxChars) {
+    return `${preview.slice(0, maxChars)}...`;
+  }
+  return preview;
+}
+
+function formatCallArgsPreview(
+  params: McporterParams,
+  maxChars: number = CALL_ARGS_PREVIEW_MAX_CHARS,
+): string | undefined {
+  if (maxChars <= 0) {
+    return undefined;
+  }
+
   const hasArgs = params.args !== undefined;
   const hasArgsJson =
     typeof params.argsJson === "string" && params.argsJson.trim().length > 0;
@@ -569,9 +870,9 @@ function formatCallArgsPreview(params: McporterParams): string | undefined {
   }
 
   if (hasArgsJson) {
-    return formatArgsJsonPreview(
-      params.argsJson as string,
-      CALL_ARGS_PREVIEW_MAX_CHARS,
+    return (
+      formatArgsJsonKeyValuePreview(params.argsJson as string, maxChars) ??
+      formatArgsJsonPreview(params.argsJson as string, maxChars)
     );
   }
 
@@ -581,10 +882,7 @@ function formatCallArgsPreview(params: McporterParams): string | undefined {
   }
 
   try {
-    return formatArgsObjectPreview(
-      argsResult.args,
-      CALL_ARGS_PREVIEW_MAX_CHARS,
-    );
+    return formatArgsObjectKeyValuePreview(argsResult.args, maxChars);
   } catch {
     return undefined;
   }

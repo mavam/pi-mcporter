@@ -129,10 +129,56 @@ describe("mcporter renderer", () => {
         },
         createTheme(),
       ),
+      120,
     );
 
     expect(rendered).toContain("mcporter call linear.list_issues");
-    expect(rendered).toContain('{"team":"PI","limit":10,"state":"Todo"}');
+    expect(rendered).toContain("\n  team=PI limit=10 state=Todo");
+  });
+
+  it("sizes call arg previews to the available width", () => {
+    const { tool } = createExtensionHarness();
+
+    const wide = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: {
+            assignee: "me",
+            limit: 100,
+            orderBy: "updatedAt",
+            includeArchived: false,
+          },
+        },
+        createTheme(),
+      ),
+      120,
+    );
+    const narrow = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: {
+            assignee: "me",
+            limit: 100,
+            orderBy: "updatedAt",
+            includeArchived: false,
+          },
+        },
+        createTheme(),
+      ),
+      50,
+    );
+
+    expect(wide).toContain("assignee=me");
+    expect(wide).toContain("orderBy=updatedAt");
+    expect(wide).toContain("includeArchived=false");
+    expect(narrow).toContain("mcporter call linear.list_issues");
+    expect(narrow).toContain("assignee=me");
+    expect(narrow).toContain("...");
+    expect(narrow).not.toContain("includeArchived=false");
   });
 
   it("omits empty call args from the call header", () => {
@@ -147,6 +193,7 @@ describe("mcporter renderer", () => {
         },
         createTheme(),
       ),
+      120,
     );
 
     expect(rendered).toBe("mcporter call linear.list_issues");
@@ -203,7 +250,7 @@ describe("call args preview formatting", () => {
         selector: "demo.echo",
         argsJson: '{\n  "team": "PI",\n  "limit": 10\n}',
       }),
-    ).toBe('{"team":"PI","limit":10}');
+    ).toBe("team=PI limit=10");
   });
 
   it("preserves whitespace inside string literals", () => {
@@ -214,7 +261,7 @@ describe("call args preview formatting", () => {
         argsJson:
           '{\n  "query": "  keep   internal spaces  ",\n  "regex": "^foo  bar$"\n}',
       }),
-    ).toBe('{"query":"  keep   internal spaces  ","r...');
+    ).toBe('query="  keep   internal spaces  " regex...');
   });
 
   it("truncates long args previews", () => {
@@ -226,7 +273,7 @@ describe("call args preview formatting", () => {
           query: "this is a deliberately long string that should be truncated",
         },
       }),
-    ).toBe('{"query":"this is a deliberately long st...');
+    ).toBe('query="this is a deliberately long strin...');
   });
 });
 
@@ -292,8 +339,11 @@ function createTheme() {
   };
 }
 
-function renderComponentText(component: {
-  render: (width: number) => string[];
-}): string {
-  return component.render(120).join("\n").trim();
+function renderComponentText(
+  component: {
+    render: (width: number) => string[];
+  },
+  width: number = 120,
+): string {
+  return component.render(width).join("\n").trim();
 }
