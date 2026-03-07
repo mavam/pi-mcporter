@@ -8,6 +8,3 @@ export const MAX_CALL_TIMEOUT_MS = 5 * 60 * 1000;
 
 export const SCHEMA_SNIPPET_MAX_BYTES = 12 * 1024;
 export const SCHEMA_SNIPPET_MAX_LINES = 350;
-
-export const MCPORTER_CONFIG_FILE_NAME = "mcporter.json";
-export const DEFAULT_CALL_OUTPUT_MODE = "summary";

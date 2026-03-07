@@ -1,157 +1,116 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import mcporterExtension from "../src/index.ts";
-import {
-	getMcporterConfigPath,
-	loadMcporterConfig,
-	resolveMcporterCallOutputMode,
-	writeMcporterCallOutputMode,
-} from "../src/mcporter-config.ts";
-import { parseMcporterCommand } from "../src/mcporter-command.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
 
-describe("parseMcporterCommand", () => {
-	it("opens settings with no args", () => {
-		expect(parseMcporterCommand("")).toEqual({ action: "open" });
-	});
+describe("mcporter renderer", () => {
+	it("collapses describe output until expanded", () => {
+		const { tool } = createExtensionHarness();
 
-	it("parses status", () => {
-		expect(parseMcporterCommand("status")).toEqual({ action: "status" });
-	});
-
-	it("defaults bare modes to global scope", () => {
-		expect(parseMcporterCommand("summary")).toEqual({
-			action: "set",
-			mode: "summary",
-		});
-	});
-
-	it("rejects invalid arguments", () => {
-		const parsed = parseMcporterCommand("global off");
-		expect("error" in parsed && parsed.error).toContain("/mcporter <full");
-	});
-});
-
-describe("resolveMcporterCallOutputMode", () => {
-	it("falls back to summary by default", () => {
-		expect(resolveMcporterCallOutputMode(undefined)).toBe("summary");
-	});
-});
-
-describe("mcporter config loading and writing", () => {
-	it("uses pi's configured agent dir by default", async () => {
-		const fixture = await createAgentDirFixture();
-		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-		process.env.PI_CODING_AGENT_DIR = fixture.agentDir;
-
-		try {
-			expect(getMcporterConfigPath()).toBe(
-				join(fixture.agentDir, "mcporter.json"),
-			);
-		} finally {
-			restoreEnv("PI_CODING_AGENT_DIR", previousAgentDir);
-		}
-	});
-
-	it("falls back safely when config contains invalid JSON", async () => {
-		const fixture = await createConfigFixture();
-		await mkdir(join(fixture.homeDir, ".pi", "agent"), { recursive: true });
-		await writeFile(
-			join(fixture.homeDir, ".pi", "agent", "mcporter.json"),
-			"{ bad json",
-			"utf8",
+		const collapsed = renderComponentText(
+			tool.renderResult(
+				{
+					content: [{ type: "text", text: "linear.list_issues\nLong schema body" }],
+					details: { action: "describe", selector: "linear.list_issues" },
+				},
+				{ expanded: false, isPartial: false },
+				createTheme(),
+			),
+		);
+		const expanded = renderComponentText(
+			tool.renderResult(
+				{
+					content: [{ type: "text", text: "linear.list_issues\nLong schema body" }],
+					details: { action: "describe", selector: "linear.list_issues" },
+				},
+				{ expanded: true, isPartial: false },
+				createTheme(),
+			),
 		);
 
-		const loaded = await loadMcporterConfig({ homeDir: fixture.homeDir });
-
-		expect(loaded.effectiveCallOutputMode).toBe("summary");
-		expect(loaded.warnings).toHaveLength(1);
-		expect(loaded.warnings[0]).toContain("Ignoring invalid mcporter config");
+		expect(collapsed).toContain("linear.list_issues schema available");
+		expect(collapsed).toContain("to expand");
+		expect(collapsed).not.toContain("Long schema body");
+		expect(expanded).toContain("Long schema body");
 	});
 
-	it("writes the global mode", async () => {
-		const fixture = await createConfigFixture();
-		const loaded = await writeMcporterCallOutputMode("off", {
-			homeDir: fixture.homeDir,
-		});
+	it("collapses search output until expanded", () => {
+		const { tool } = createExtensionHarness();
 
-		expect(loaded.config.callOutputMode).toBe("off");
-		expect(loaded.effectiveCallOutputMode).toBe("off");
-		expect(loaded.path).toBe(getMcporterConfigPath(fixture.homeDir));
+		const collapsed = renderComponentText(
+			tool.renderResult(
+				{
+					content: [
+						{
+							type: "text",
+							text:
+								"Found 2 match(es) for 'linear' across 4 server(s).\n\n- linear.list_issues",
+						},
+					],
+					details: { action: "search", resultCount: 2 },
+				},
+				{ expanded: false, isPartial: false },
+				createTheme(),
+			),
+		);
+		const expanded = renderComponentText(
+			tool.renderResult(
+				{
+					content: [
+						{
+							type: "text",
+							text:
+								"Found 2 match(es) for 'linear' across 4 server(s).\n\n- linear.list_issues",
+						},
+					],
+					details: { action: "search", resultCount: 2 },
+				},
+				{ expanded: true, isPartial: false },
+				createTheme(),
+			),
+		);
+
+		expect(collapsed).toContain("Found 2 match(es) for 'linear' across 4 server(s).");
+		expect(collapsed).toContain("to expand");
+		expect(collapsed).not.toContain("- linear.list_issues");
+		expect(expanded).toContain("- linear.list_issues");
 	});
-});
 
-describe("/mcporter command integration", () => {
-	it("renders expanded call output even when off mode is configured", async () => {
-		const fixture = await createAgentDirFixture();
-		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-		process.env.PI_CODING_AGENT_DIR = fixture.agentDir;
+	it("collapses call output until expanded", () => {
+		const { tool } = createExtensionHarness();
 
-		try {
-			const { command, tool } = createExtensionHarness();
-			await command.handler("off", {
-				hasUI: true,
-				ui: { notify: vi.fn() },
-			});
-
-			const expanded = renderComponentText(
-				tool.renderResult(
-					{
-						content: [{ type: "text", text: "full output" }],
-						details: { action: "call", selector: "demo.echo" },
+		const collapsed = renderComponentText(
+			tool.renderResult(
+				{
+					content: [{ type: "text", text: "full output" }],
+					details: {
+						action: "call",
+						selector: "demo.echo",
+						callOutputSummary: "demo.echo: text output",
 					},
-					{ expanded: true, isPartial: false },
-					createTheme(),
-				),
-			);
-			const collapsed = renderComponentText(
-				tool.renderResult(
-					{
-						content: [{ type: "text", text: "full output" }],
-						details: { action: "call", selector: "demo.echo" },
+				},
+				{ expanded: false, isPartial: false },
+				createTheme(),
+			),
+		);
+		const expanded = renderComponentText(
+			tool.renderResult(
+				{
+					content: [{ type: "text", text: "full output" }],
+					details: {
+						action: "call",
+						selector: "demo.echo",
+						callOutputSummary: "demo.echo: text output",
 					},
-					{ expanded: false, isPartial: false },
-					createTheme(),
-				),
-			);
+				},
+				{ expanded: true, isPartial: false },
+				createTheme(),
+			),
+		);
 
-			expect(expanded).toContain("full output");
-			expect(collapsed).toContain("output hidden by /mcporter");
-		} finally {
-			restoreEnv("PI_CODING_AGENT_DIR", previousAgentDir);
-		}
-	});
-
-	it("emits visible status text without UI", async () => {
-		const fixture = await createAgentDirFixture();
-		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-		process.env.PI_CODING_AGENT_DIR = fixture.agentDir;
-		const stderr: string[] = [];
-		const stderrSpy = vi
-			.spyOn(process.stderr, "write")
-			.mockImplementation(((chunk: string | Uint8Array) => {
-				stderr.push(String(chunk));
-				return true;
-			}) as typeof process.stderr.write);
-
-		try {
-			const { command } = createExtensionHarness();
-			const notify = vi.fn();
-			await command.handler("status", {
-				hasUI: false,
-				ui: { notify },
-			});
-
-			expect(notify).not.toHaveBeenCalled();
-			expect(stderr.join("")).toContain(
-				`mcporter call output: summary (${join(fixture.agentDir, "mcporter.json")})`,
-			);
-		} finally {
-			stderrSpy.mockRestore();
-			restoreEnv("PI_CODING_AGENT_DIR", previousAgentDir);
-		}
+		expect(collapsed).toContain("demo.echo: text output");
+		expect(collapsed).toContain("to expand");
+		expect(collapsed).not.toContain("full output");
+		expect(expanded).toContain("full output");
 	});
 });
 
@@ -197,35 +156,7 @@ describe("call output formatting", () => {
 	});
 });
 
-async function createConfigFixture(): Promise<{ homeDir: string }> {
-	const root = await mkdtemp(join(tmpdir(), "pi-mcporter-test-"));
-	const homeDir = join(root, "home");
-	await mkdir(homeDir, { recursive: true });
-	return { homeDir };
-}
-
-async function createAgentDirFixture(): Promise<{ agentDir: string }> {
-	const root = await mkdtemp(join(tmpdir(), "pi-mcporter-agent-"));
-	const agentDir = join(root, "custom-agent");
-	await mkdir(agentDir, { recursive: true });
-	return { agentDir };
-}
-
-function restoreEnv(name: string, value: string | undefined): void {
-	if (value === undefined) {
-		delete process.env[name];
-		return;
-	}
-	process.env[name] = value;
-}
-
 function createExtensionHarness(): {
-	command: {
-		handler: (
-			args: string,
-			ctx: { hasUI: boolean; ui: { notify: (message: string, level?: string) => void } },
-		) => Promise<void>;
-	};
 	tool: {
 		renderResult: (
 			result: unknown,
@@ -234,17 +165,6 @@ function createExtensionHarness(): {
 		) => { render: (width: number) => string[] };
 	};
 } {
-	let command:
-		| {
-				handler: (
-					args: string,
-					ctx: {
-						hasUI: boolean;
-						ui: { notify: (message: string, level?: string) => void };
-					},
-				) => Promise<void>;
-		  }
-		| undefined;
 	let tool:
 		| {
 				renderResult: (
@@ -261,11 +181,7 @@ function createExtensionHarness(): {
 			return flags.get(name);
 		},
 		on() {},
-		registerCommand(name: string, options: unknown) {
-			if (name === "mcporter") {
-				command = options as typeof command;
-			}
-		},
+		registerCommand() {},
 		registerFlag(name: string, options: { default?: string }) {
 			if (options.default !== undefined) {
 				flags.set(name, options.default);
@@ -276,11 +192,11 @@ function createExtensionHarness(): {
 		},
 	} as never);
 
-	if (!command || !tool) {
+	if (!tool) {
 		throw new Error("Failed to register mcporter extension test harness");
 	}
 
-	return { command, tool };
+	return { tool };
 }
 
 function createTheme() {

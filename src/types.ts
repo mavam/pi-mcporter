@@ -1,6 +1,5 @@
 import type { TruncationResult } from "@mariozechner/pi-coding-agent";
 
-export type McporterCallOutputMode = "full" | "summary" | "off";
 export type McporterCallOutputKind = "text" | "structured" | "json" | "raw";
 
 export interface CatalogTool {

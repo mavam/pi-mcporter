@@ -1,26 +1,18 @@
 import { readFile } from "node:fs/promises";
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	Theme,
-} from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
-	getSettingsListTheme,
 	keyHint,
 } from "@mariozechner/pi-coding-agent";
-import { Container, type SettingItem, SettingsList, Text } from "@mariozechner/pi-tui";
+import { Text } from "@mariozechner/pi-tui";
 import { createRuntime, type Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
 import { handleSearchAction } from "./actions/search.js";
 import { CatalogStore } from "./catalog-store.js";
-import {
-	DEFAULT_CALL_OUTPUT_MODE,
-	DEFAULT_CALL_TIMEOUT_MS,
-} from "./constants.js";
+import { DEFAULT_CALL_TIMEOUT_MS } from "./constants.js";
 import { cleanSingleLine, textContent, toErrorMessage } from "./helpers.js";
 import {
 	clampLimit,
@@ -28,19 +20,9 @@ import {
 	parseSelector,
 	resolveCallTimeoutFromInputs,
 } from "./inputs.js";
-import {
-	getMcporterCommandCompletions,
-	mcporterCommandUsage,
-	parseMcporterCommand,
-} from "./mcporter-command.js";
-import {
-	loadMcporterConfig,
-	resolveMcporterCallOutputMode,
-	writeMcporterCallOutputMode,
-} from "./mcporter-config.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
-import type { McporterCallOutputMode, ToolDetails } from "./types.js";
+import type { ToolDetails } from "./types.js";
 
 const PACKAGE_VERSION: string = await readFile(
 	new URL("../package.json", import.meta.url),
@@ -52,7 +34,6 @@ const PACKAGE_VERSION: string = await readFile(
 export default function mcporterExtension(pi: ExtensionAPI) {
 	let runtime: Runtime | undefined;
 	let runtimePromise: Promise<Runtime> | undefined;
-	let callOutputMode: McporterCallOutputMode = DEFAULT_CALL_OUTPUT_MODE;
 	const catalogStore = new CatalogStore();
 
 	pi.registerFlag("mcporter-config", {
@@ -67,54 +48,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 		default: String(DEFAULT_CALL_TIMEOUT_MS),
 	});
 
-	pi.registerCommand("mcporter", {
-		description: "Configure mcporter call output display",
-		getArgumentCompletions: getMcporterCommandCompletions,
-		handler: async (args, ctx) => {
-			const parsed = parseMcporterCommand(args);
-			if ("error" in parsed) {
-				emitNotice(ctx, parsed.error, "warning");
-				return;
-			}
-
-			const loaded = await refreshCallOutputMode();
-			switch (parsed.action) {
-				case "open":
-					if (!ctx.hasUI) {
-						notifyCallOutputStatus(ctx, loaded);
-						return;
-					}
-					await openMcporterSettings(ctx, loaded);
-					return;
-				case "status":
-					notifyCallOutputStatus(ctx, loaded);
-					return;
-				case "set": {
-					const next = await writeMcporterCallOutputMode(parsed.mode);
-					applyCallOutputMode(next.effectiveCallOutputMode);
-					notifyConfigWarnings(ctx, next.warnings);
-					notifyCallOutputStatus(ctx, next);
-					return;
-				}
-			}
-		},
-	});
-
 	pi.on("session_start", async (_event, ctx) => {
-		try {
-			const loaded = await refreshCallOutputMode();
-			notifyConfigWarnings(ctx, loaded.warnings);
-		} catch (error) {
-			if (ctx.hasUI) {
-				ctx.ui.notify(
-					`mcporter extension: ${toErrorMessage(error)}`,
-					"warning",
-				);
-			} else {
-				emitStderrNotice(`mcporter extension: ${toErrorMessage(error)}`);
-			}
-		}
-
 		try {
 			await ensureRuntime();
 		} catch (error) {
@@ -235,24 +169,19 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 				return renderBlockText(text ?? "mcporter failed", theme, "error");
 			}
 
-			if (details?.action !== "call") {
+			if (!details) {
 				return renderBlockText(text ?? "", theme, "toolOutput");
 			}
 
-			if (callOutputMode === "full") {
-				return renderBlockText(text ?? "", theme, "toolOutput");
+			if (details.action !== "call") {
+				if (expanded) {
+					return renderBlockText(text ?? "", theme, "toolOutput");
+				}
+				return renderCollapsedActionSummary(details, text, theme);
 			}
 
 			if (expanded) {
 				return renderBlockText(text ?? "", theme, "toolOutput");
-			}
-
-			if (callOutputMode === "off") {
-				return renderSimpleText(
-					`${details.selector ?? "mcporter call"} output hidden by /mcporter`,
-					theme,
-					"muted",
-				);
 			}
 
 			const summary =
@@ -261,7 +190,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 			let summaryText = theme.fg("success", summary);
 			summaryText += theme.fg(
 				"muted",
-				` (${keyHint("expandTools", "to expand")})`,
+				` (${getExpandHint()})`,
 			);
 			return new Text(summaryText, 0, 0);
 		},
@@ -301,129 +230,6 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 		return runtimePromise;
 	}
 
-	async function refreshCallOutputMode() {
-		const loaded = await loadMcporterConfig();
-		applyCallOutputMode(loaded.effectiveCallOutputMode);
-		return loaded;
-	}
-
-	async function openMcporterSettings(
-		ctx: ExtensionCommandContext,
-		initialConfig: Awaited<ReturnType<typeof loadMcporterConfig>>,
-	): Promise<void> {
-		let currentConfig = initialConfig;
-		await ctx.ui.custom((tui, theme, _kb, done) => {
-			const settingsItems: SettingItem[] = [
-				{
-					id: "call-output",
-					label: "Call output",
-					description: `Stored in ${currentConfig.path}`,
-					currentValue:
-						currentConfig.config.callOutputMode ?? DEFAULT_CALL_OUTPUT_MODE,
-					values: ["full", "summary", "off"],
-				},
-			];
-
-			const settingsList = new SettingsList(
-				settingsItems,
-				4,
-				getSettingsListTheme(),
-				(_settingId, newValue) => {
-					const previousValue =
-						currentConfig.config.callOutputMode ?? DEFAULT_CALL_OUTPUT_MODE;
-					void persistSettingsChange(newValue, previousValue);
-				},
-				() => {
-					done(undefined);
-				},
-			);
-
-			const header = new (class {
-				render(_width: number) {
-					return [
-						theme.fg("accent", theme.bold("MCPorter Settings")),
-						theme.fg(
-							"muted",
-							`Effective call output: ${currentConfig.effectiveCallOutputMode}`,
-						),
-						"",
-					];
-				}
-				invalidate() {}
-			})();
-
-			const container = new Container();
-			container.addChild(header);
-			container.addChild(settingsList);
-
-			async function persistSettingsChange(
-				newValue: string,
-				previousValue: string,
-			): Promise<void> {
-				try {
-					const nextConfig = await writeMcporterCallOutputMode(
-						newValue as McporterCallOutputMode,
-					);
-					currentConfig = nextConfig;
-					applyCallOutputMode(nextConfig.effectiveCallOutputMode);
-					settingsList.updateValue(
-						"call-output",
-						nextConfig.config.callOutputMode ?? DEFAULT_CALL_OUTPUT_MODE,
-					);
-					notifyConfigWarnings(ctx, nextConfig.warnings);
-				} catch (error) {
-					settingsList.updateValue("call-output", previousValue);
-					ctx.ui.notify(toErrorMessage(error), "warning");
-				} finally {
-					tui.requestRender();
-				}
-			}
-
-			return {
-				render(width: number) {
-					return container.render(width);
-				},
-				invalidate() {
-					container.invalidate();
-				},
-				handleInput(data: string) {
-					settingsList.handleInput?.(data);
-					tui.requestRender();
-				},
-			};
-		});
-	}
-
-	function applyCallOutputMode(mode: McporterCallOutputMode): void {
-		callOutputMode = mode;
-	}
-
-	function notifyConfigWarnings(
-		ctx: {
-			hasUI: boolean;
-			ui: { notify: (message: string, level: "warning") => void };
-		},
-		warnings: string[],
-	): void {
-		for (const warning of warnings) {
-			emitNotice(ctx, warning, "warning");
-		}
-	}
-
-	function notifyCallOutputStatus(
-		ctx: {
-			hasUI: boolean;
-			ui: { notify: (message: string, level: "info") => void };
-		},
-		loaded: Awaited<ReturnType<typeof loadMcporterConfig>>,
-	): void {
-		emitNotice(
-			ctx,
-			`mcporter call output: ${loaded.effectiveCallOutputMode} (${loaded.path})`,
-			"info",
-		);
-	}
-
 	function resolveCallTimeout(override?: number): number {
 		const flagValue = pi.getFlag("mcporter-timeout-ms");
 		return resolveCallTimeoutFromInputs(
@@ -431,21 +237,6 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 			typeof flagValue === "string" ? flagValue : undefined,
 		);
 	}
-}
-
-function emitNotice(
-	ctx: {
-		hasUI: boolean;
-		ui: { notify: (message: string, level?: "info" | "warning" | "error") => void };
-	},
-	message: string,
-	level: "info" | "warning" | "error",
-): void {
-	if (ctx.hasUI) {
-		ctx.ui.notify(message, level);
-		return;
-	}
-	emitStderrNotice(message);
 }
 
 function emitStderrNotice(message: string): void {
@@ -489,16 +280,60 @@ function renderSimpleText(
 	return new Text(theme.fg(color, text), 0, 0);
 }
 
+function renderCollapsedActionSummary(
+	details: ToolDetails,
+	text: string | undefined,
+	theme: Pick<Theme, "fg">,
+): Text {
+	const summary = getCollapsedActionSummary(details, text);
+	let summaryText = theme.fg("success", summary);
+	summaryText += theme.fg(
+		"muted",
+		` (${getExpandHint()})`,
+	);
+	return new Text(summaryText, 0, 0);
+}
+
+function getCollapsedActionSummary(
+	details: ToolDetails,
+	text: string | undefined,
+): string {
+	switch (details.action) {
+		case "describe":
+			return `${details.selector ?? "mcporter describe"} schema available`;
+		case "search":
+			return getFirstLine(text) ?? "mcporter search results available";
+		case "call":
+			return (
+				details.callOutputSummary ??
+				`${details.selector ?? "mcporter call"}: output available`
+			);
+	}
+}
+
+function getFirstLine(text: string | undefined): string | undefined {
+	if (!text) {
+		return undefined;
+	}
+	const firstLine = text.split("\n", 1)[0]?.trim();
+	return firstLine && firstLine.length > 0 ? firstLine : undefined;
+}
+
+function getExpandHint(): string {
+	try {
+		return keyHint("expandTools", "to expand");
+	} catch {
+		return "to expand";
+	}
+}
+
 export const __test__ = {
 	clampLimit,
 	levenshtein,
-	mcporterCommandUsage,
 	parseCallArgs,
-	parseMcporterCommand,
 	parseSelector,
 	rankTools,
 	resolveCallTimeoutFromInputs,
-	resolveMcporterCallOutputMode,
 	scoreTool,
 	suggest,
 };
