@@ -73,7 +73,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const parsed = parseMcporterCommand(args);
 			if ("error" in parsed) {
-				ctx.ui.notify(parsed.error, "warning");
+				emitNotice(ctx, parsed.error, "warning");
 				return;
 			}
 
@@ -110,6 +110,8 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 					`mcporter extension: ${toErrorMessage(error)}`,
 					"warning",
 				);
+			} else {
+				emitStderrNotice(`mcporter extension: ${toErrorMessage(error)}`);
 			}
 		}
 
@@ -121,6 +123,8 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 					`mcporter extension: ${toErrorMessage(error)}`,
 					"warning",
 				);
+			} else {
+				emitStderrNotice(`mcporter extension: ${toErrorMessage(error)}`);
 			}
 		}
 	});
@@ -239,16 +243,16 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 				return renderBlockText(text ?? "", theme, "toolOutput");
 			}
 
+			if (expanded) {
+				return renderBlockText(text ?? "", theme, "toolOutput");
+			}
+
 			if (callOutputMode === "off") {
 				return renderSimpleText(
 					`${details.selector ?? "mcporter call"} output hidden by /mcporter`,
 					theme,
 					"muted",
 				);
-			}
-
-			if (expanded) {
-				return renderBlockText(text ?? "", theme, "toolOutput");
 			}
 
 			const summary =
@@ -395,24 +399,26 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 	}
 
 	function notifyConfigWarnings(
-		ctx: { hasUI: boolean; ui: { notify: (message: string, level: "warning") => void } },
+		ctx: {
+			hasUI: boolean;
+			ui: { notify: (message: string, level: "warning") => void };
+		},
 		warnings: string[],
 	): void {
-		if (!ctx.hasUI) {
-			return;
-		}
 		for (const warning of warnings) {
-			ctx.ui.notify(warning, "warning");
+			emitNotice(ctx, warning, "warning");
 		}
 	}
 
 	function notifyCallOutputStatus(
 		ctx: {
+			hasUI: boolean;
 			ui: { notify: (message: string, level: "info") => void };
 		},
 		loaded: Awaited<ReturnType<typeof loadMcporterConfig>>,
 	): void {
-		ctx.ui.notify(
+		emitNotice(
+			ctx,
 			`mcporter call output: ${loaded.effectiveCallOutputMode} (${loaded.path})`,
 			"info",
 		);
@@ -425,6 +431,25 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 			typeof flagValue === "string" ? flagValue : undefined,
 		);
 	}
+}
+
+function emitNotice(
+	ctx: {
+		hasUI: boolean;
+		ui: { notify: (message: string, level?: "info" | "warning" | "error") => void };
+	},
+	message: string,
+	level: "info" | "warning" | "error",
+): void {
+	if (ctx.hasUI) {
+		ctx.ui.notify(message, level);
+		return;
+	}
+	emitStderrNotice(message);
+}
+
+function emitStderrNotice(message: string): void {
+	process.stderr.write(`${message}\n`);
 }
 
 function extractTextContent(

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import {
 	DEFAULT_CALL_OUTPUT_MODE,
 	MCPORTER_CONFIG_FILE_NAME,
@@ -31,8 +31,11 @@ export function resolveMcporterCallOutputMode(
 	return mode ?? DEFAULT_CALL_OUTPUT_MODE;
 }
 
-export function getMcporterConfigPath(homeDir = homedir()): string {
-	return join(homeDir, ".pi", "agent", MCPORTER_CONFIG_FILE_NAME);
+export function getMcporterConfigPath(homeDir?: string): string {
+	return join(
+		homeDir ? join(homeDir, ".pi", "agent") : getAgentDir(),
+		MCPORTER_CONFIG_FILE_NAME,
+	);
 }
 
 export async function loadMcporterConfig(options?: {
