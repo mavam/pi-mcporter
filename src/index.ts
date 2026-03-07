@@ -330,26 +330,261 @@ function getExpandHint(): string {
   }
 }
 
-function formatCallArgsPreview(params: McporterParams): string | undefined {
-  const argsResult = parseCallArgs(params);
-  if ("error" in argsResult) {
+function appendEscapedJsonString(
+  value: string,
+  parts: string[],
+  output: { length: number; truncated: boolean },
+  maxChars: number,
+): void {
+  if (output.truncated) {
+    return;
+  }
+
+  appendPreviewText('"', parts, output, maxChars);
+  for (const char of value) {
+    if (output.truncated) {
+      break;
+    }
+
+    switch (char) {
+      case '"':
+        appendPreviewText('\\"', parts, output, maxChars);
+        break;
+      case "\\":
+        appendPreviewText("\\\\", parts, output, maxChars);
+        break;
+      case "\b":
+        appendPreviewText("\\b", parts, output, maxChars);
+        break;
+      case "\f":
+        appendPreviewText("\\f", parts, output, maxChars);
+        break;
+      case "\n":
+        appendPreviewText("\\n", parts, output, maxChars);
+        break;
+      case "\r":
+        appendPreviewText("\\r", parts, output, maxChars);
+        break;
+      case "\t":
+        appendPreviewText("\\t", parts, output, maxChars);
+        break;
+      default:
+        if (char < " ") {
+          appendPreviewText(
+            `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+            parts,
+            output,
+            maxChars,
+          );
+        } else {
+          appendPreviewText(char, parts, output, maxChars);
+        }
+        break;
+    }
+  }
+  appendPreviewText('"', parts, output, maxChars);
+}
+
+function appendJsonValuePreview(
+  value: unknown,
+  parts: string[],
+  output: { length: number; truncated: boolean },
+  maxChars: number,
+): void {
+  if (output.truncated) {
+    return;
+  }
+
+  if (value === null) {
+    appendPreviewText("null", parts, output, maxChars);
+    return;
+  }
+
+  switch (typeof value) {
+    case "string":
+      appendEscapedJsonString(value, parts, output, maxChars);
+      return;
+    case "number":
+      appendPreviewText(
+        Number.isFinite(value) ? String(value) : "null",
+        parts,
+        output,
+        maxChars,
+      );
+      return;
+    case "boolean":
+      appendPreviewText(value ? "true" : "false", parts, output, maxChars);
+      return;
+    case "bigint":
+      appendPreviewText("null", parts, output, maxChars);
+      return;
+    case "object":
+      if (Array.isArray(value)) {
+        appendPreviewText("[", parts, output, maxChars);
+        for (let index = 0; index < value.length; index += 1) {
+          if (index > 0) {
+            appendPreviewText(",", parts, output, maxChars);
+          }
+          appendJsonValuePreview(value[index], parts, output, maxChars);
+          if (output.truncated) {
+            break;
+          }
+        }
+        appendPreviewText("]", parts, output, maxChars);
+        return;
+      }
+
+      appendPreviewText("{", parts, output, maxChars);
+      const entries = Object.entries(value as Record<string, unknown>);
+      for (let index = 0; index < entries.length; index += 1) {
+        const [key, entryValue] = entries[index];
+        if (index > 0) {
+          appendPreviewText(",", parts, output, maxChars);
+        }
+        appendEscapedJsonString(key, parts, output, maxChars);
+        appendPreviewText(":", parts, output, maxChars);
+        appendJsonValuePreview(entryValue, parts, output, maxChars);
+        if (output.truncated) {
+          break;
+        }
+      }
+      appendPreviewText("}", parts, output, maxChars);
+      return;
+    default:
+      appendPreviewText("null", parts, output, maxChars);
+  }
+}
+
+function appendPreviewText(
+  text: string,
+  parts: string[],
+  output: { length: number; truncated: boolean },
+  maxChars: number,
+): void {
+  if (output.truncated || text.length === 0) {
+    return;
+  }
+
+  const remaining = maxChars + 1 - output.length;
+  if (remaining <= 0) {
+    output.truncated = true;
+    return;
+  }
+
+  if (text.length > remaining) {
+    parts.push(text.slice(0, remaining));
+    output.length += remaining;
+    output.truncated = true;
+    return;
+  }
+
+  parts.push(text);
+  output.length += text.length;
+}
+
+function formatArgsObjectPreview(
+  value: Record<string, unknown>,
+  maxChars: number,
+): string {
+  const parts: string[] = [];
+  const output = { length: 0, truncated: false };
+  appendJsonValuePreview(value, parts, output, maxChars);
+  const preview = parts.join("");
+  if (preview.length === 0) {
+    return preview;
+  }
+  if (output.truncated || preview.length > maxChars) {
+    return `${preview.slice(0, maxChars)}...`;
+  }
+  return preview;
+}
+
+function formatArgsJsonPreview(
+  raw: string,
+  maxChars: number,
+): string | undefined {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || !trimmed.startsWith("{")) {
     return undefined;
   }
 
-  if (Object.keys(argsResult.args).length === 0) {
+  const parts: string[] = [];
+  let inString = false;
+  let escaping = false;
+  let length = 0;
+  let truncated = false;
+
+  for (const char of trimmed) {
+    if (!inString && /\s/.test(char)) {
+      continue;
+    }
+
+    const remaining = maxChars + 1 - length;
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+
+    if (remaining < 1) {
+      truncated = true;
+      break;
+    }
+
+    parts.push(char);
+    length += 1;
+
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === "\\") {
+        escaping = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    }
+  }
+
+  const preview = parts.join("");
+  if (preview === "{}") {
+    return undefined;
+  }
+  if (truncated || preview.length > maxChars) {
+    return `${preview.slice(0, maxChars)}...`;
+  }
+  return preview;
+}
+
+function formatCallArgsPreview(params: McporterParams): string | undefined {
+  const hasArgs = params.args !== undefined;
+  const hasArgsJson =
+    typeof params.argsJson === "string" && params.argsJson.trim().length > 0;
+
+  if (hasArgs && hasArgsJson) {
+    return undefined;
+  }
+
+  if (hasArgsJson) {
+    return formatArgsJsonPreview(
+      params.argsJson as string,
+      CALL_ARGS_PREVIEW_MAX_CHARS,
+    );
+  }
+
+  const argsResult = parseCallArgs(params);
+  if ("error" in argsResult || Object.keys(argsResult.args).length === 0) {
     return undefined;
   }
 
   try {
-    const serialized = JSON.stringify(argsResult.args);
-    if (!serialized) {
-      return undefined;
-    }
-    const singleLine = cleanSingleLine(serialized);
-    if (singleLine.length <= CALL_ARGS_PREVIEW_MAX_CHARS) {
-      return singleLine;
-    }
-    return `${singleLine.slice(0, CALL_ARGS_PREVIEW_MAX_CHARS)}...`;
+    return formatArgsObjectPreview(
+      argsResult.args,
+      CALL_ARGS_PREVIEW_MAX_CHARS,
+    );
   } catch {
     return undefined;
   }

@@ -206,14 +206,24 @@ describe("call args preview formatting", () => {
     ).toBe('{"team":"PI","limit":10}');
   });
 
+  it("preserves whitespace inside string literals", () => {
+    expect(
+      __test__.formatCallArgsPreview({
+        action: "call",
+        selector: "demo.echo",
+        argsJson:
+          '{\n  "query": "  keep   internal spaces  ",\n  "regex": "^foo  bar$"\n}',
+      }),
+    ).toBe('{"query":"  keep   internal spaces  ","r...');
+  });
+
   it("truncates long args previews", () => {
     expect(
       __test__.formatCallArgsPreview({
         action: "call",
         selector: "demo.echo",
         args: {
-          query:
-            "this is a deliberately long string that should be truncated",
+          query: "this is a deliberately long string that should be truncated",
         },
       }),
     ).toBe('{"query":"this is a deliberately long st...');
