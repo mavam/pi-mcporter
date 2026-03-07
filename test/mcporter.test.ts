@@ -265,45 +265,58 @@ describe("call output formatting", () => {
 describe("call args preview formatting", () => {
   it("formats argsJson as compact single-line JSON", () => {
     expect(
-      __test__.formatCallArgsPreview({
-        action: "call",
-        selector: "demo.echo",
-        argsJson: '{\n  "team": "PI",\n  "limit": 10\n}',
-      }),
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson: '{\n  "team": "PI",\n  "limit": 10\n}',
+        },
+        40,
+      ),
     ).toBe("team=PI limit=10");
   });
 
   it("preserves whitespace inside string literals", () => {
     expect(
-      __test__.formatCallArgsPreview({
-        action: "call",
-        selector: "demo.echo",
-        argsJson:
-          '{\n  "query": "  keep   internal spaces  ",\n  "regex": "^foo  bar$"\n}',
-      }),
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "query": "  keep   internal spaces  ",\n  "regex": "^foo  bar$"\n}',
+        },
+        40,
+      ),
     ).toBe('query="  keep   internal spaces  " regex...');
   });
 
   it("compacts multiline array values in argsJson", () => {
     expect(
-      __test__.formatCallArgsPreview({
-        action: "call",
-        selector: "demo.echo",
-        argsJson:
-          '{\n  "items": [\n    1,\n    2\n  ],\n  "nested": {\n    "ok": true\n  }\n}',
-      }),
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "items": [\n    1,\n    2\n  ],\n  "nested": {\n    "ok": true\n  }\n}',
+        },
+        40,
+      ),
     ).toBe('items=[1,2] nested={"ok":true}');
   });
 
   it("truncates long args previews", () => {
     expect(
-      __test__.formatCallArgsPreview({
-        action: "call",
-        selector: "demo.echo",
-        args: {
-          query: "this is a deliberately long string that should be truncated",
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          args: {
+            query:
+              "this is a deliberately long string that should be truncated",
+          },
         },
-      }),
+        40,
+      ),
     ).toBe('query="this is a deliberately long strin...');
   });
 });

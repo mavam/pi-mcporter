@@ -36,8 +36,6 @@ const PACKAGE_VERSION: string = await readFile(
   .then((raw) => (JSON.parse(raw) as { version: string }).version)
   .catch(() => "0.0.0-dev");
 
-const CALL_ARGS_PREVIEW_MAX_CHARS = 40;
-
 export default function mcporterExtension(pi: ExtensionAPI) {
   let runtime: Runtime | undefined;
   let runtimePromise: Promise<Runtime> | undefined;
@@ -608,13 +606,6 @@ function formatArgsObjectKeyValuePreview(
   return preview;
 }
 
-function formatArgsObjectPreview(
-  value: Record<string, unknown>,
-  maxChars: number,
-): string {
-  return formatJsonValuePreview(value, maxChars);
-}
-
 function formatCompactJsonContainerPreview(
   raw: string,
   maxChars: number,
@@ -871,7 +862,7 @@ function formatArgsJsonKeyValuePreview(
 
 function formatCallArgsPreview(
   params: McporterParams,
-  maxChars: number = CALL_ARGS_PREVIEW_MAX_CHARS,
+  maxChars: number,
 ): string | undefined {
   if (maxChars <= 0) {
     return undefined;
