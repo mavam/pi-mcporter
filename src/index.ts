@@ -360,22 +360,54 @@ function isBarePreviewToken(value: string): boolean {
   return /^[A-Za-z0-9._:/@-]+$/.test(value);
 }
 
+function truncateWithEllipsis(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars)}...`;
+}
+
+function stringifyPreviewJson(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    const json = JSON.stringify(value, (_key, currentValue) => {
+      if (typeof currentValue === "bigint") {
+        return null;
+      }
+      if (typeof currentValue === "number" && !Number.isFinite(currentValue)) {
+        return null;
+      }
+      if (
+        currentValue === undefined ||
+        typeof currentValue === "function" ||
+        typeof currentValue === "symbol"
+      ) {
+        return null;
+      }
+      if (typeof currentValue === "object" && currentValue !== null) {
+        if (seen.has(currentValue)) {
+          return "[Circular]";
+        }
+        seen.add(currentValue);
+      }
+      return currentValue;
+    });
+    return json ?? "null";
+  } catch {
+    return "null";
+  }
+}
+
 function formatPreviewString(value: string, maxChars: number): string {
   if (value.length > 0 && isBarePreviewToken(value)) {
-    if (value.length <= maxChars) {
-      return value;
-    }
-    return `${value.slice(0, maxChars)}...`;
+    return truncateWithEllipsis(value, maxChars);
   }
   return formatJsonValuePreview(value, maxChars);
 }
 
 function formatPreviewKey(key: string, maxChars: number): string {
   if (key.length > 0 && isBarePreviewToken(key)) {
-    if (key.length <= maxChars) {
-      return key;
-    }
-    return `${key.slice(0, maxChars)}...`;
+    return truncateWithEllipsis(key, maxChars);
   }
   return formatJsonValuePreview(key, maxChars);
 }
@@ -401,170 +433,8 @@ function formatPreviewValue(value: unknown, maxChars: number): string {
   }
 }
 
-function appendEscapedJsonString(
-  value: string,
-  parts: string[],
-  output: { length: number; truncated: boolean },
-  maxChars: number,
-): void {
-  if (output.truncated) {
-    return;
-  }
-
-  appendPreviewText('"', parts, output, maxChars);
-  for (const char of value) {
-    if (output.truncated) {
-      break;
-    }
-
-    switch (char) {
-      case '"':
-        appendPreviewText('\\"', parts, output, maxChars);
-        break;
-      case "\\":
-        appendPreviewText("\\\\", parts, output, maxChars);
-        break;
-      case "\b":
-        appendPreviewText("\\b", parts, output, maxChars);
-        break;
-      case "\f":
-        appendPreviewText("\\f", parts, output, maxChars);
-        break;
-      case "\n":
-        appendPreviewText("\\n", parts, output, maxChars);
-        break;
-      case "\r":
-        appendPreviewText("\\r", parts, output, maxChars);
-        break;
-      case "\t":
-        appendPreviewText("\\t", parts, output, maxChars);
-        break;
-      default:
-        if (char < " ") {
-          appendPreviewText(
-            `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
-            parts,
-            output,
-            maxChars,
-          );
-        } else {
-          appendPreviewText(char, parts, output, maxChars);
-        }
-        break;
-    }
-  }
-  appendPreviewText('"', parts, output, maxChars);
-}
-
-function appendJsonValuePreview(
-  value: unknown,
-  parts: string[],
-  output: { length: number; truncated: boolean },
-  maxChars: number,
-): void {
-  if (output.truncated) {
-    return;
-  }
-
-  if (value === null) {
-    appendPreviewText("null", parts, output, maxChars);
-    return;
-  }
-
-  switch (typeof value) {
-    case "string":
-      appendEscapedJsonString(value, parts, output, maxChars);
-      return;
-    case "number":
-      appendPreviewText(
-        Number.isFinite(value) ? String(value) : "null",
-        parts,
-        output,
-        maxChars,
-      );
-      return;
-    case "boolean":
-      appendPreviewText(value ? "true" : "false", parts, output, maxChars);
-      return;
-    case "bigint":
-      appendPreviewText("null", parts, output, maxChars);
-      return;
-    case "object":
-      if (Array.isArray(value)) {
-        appendPreviewText("[", parts, output, maxChars);
-        for (let index = 0; index < value.length; index += 1) {
-          if (index > 0) {
-            appendPreviewText(",", parts, output, maxChars);
-          }
-          appendJsonValuePreview(value[index], parts, output, maxChars);
-          if (output.truncated) {
-            break;
-          }
-        }
-        appendPreviewText("]", parts, output, maxChars);
-        return;
-      }
-
-      appendPreviewText("{", parts, output, maxChars);
-      const entries = Object.entries(value as Record<string, unknown>);
-      for (let index = 0; index < entries.length; index += 1) {
-        const [key, entryValue] = entries[index];
-        if (index > 0) {
-          appendPreviewText(",", parts, output, maxChars);
-        }
-        appendEscapedJsonString(key, parts, output, maxChars);
-        appendPreviewText(":", parts, output, maxChars);
-        appendJsonValuePreview(entryValue, parts, output, maxChars);
-        if (output.truncated) {
-          break;
-        }
-      }
-      appendPreviewText("}", parts, output, maxChars);
-      return;
-    default:
-      appendPreviewText("null", parts, output, maxChars);
-  }
-}
-
-function appendPreviewText(
-  text: string,
-  parts: string[],
-  output: { length: number; truncated: boolean },
-  maxChars: number,
-): void {
-  if (output.truncated || text.length === 0) {
-    return;
-  }
-
-  const remaining = maxChars + 1 - output.length;
-  if (remaining <= 0) {
-    output.truncated = true;
-    return;
-  }
-
-  if (text.length > remaining) {
-    parts.push(text.slice(0, remaining));
-    output.length += remaining;
-    output.truncated = true;
-    return;
-  }
-
-  parts.push(text);
-  output.length += text.length;
-}
-
 function formatJsonValuePreview(value: unknown, maxChars: number): string {
-  const parts: string[] = [];
-  const output = { length: 0, truncated: false };
-  appendJsonValuePreview(value, parts, output, maxChars);
-  const preview = parts.join("");
-  if (preview.length === 0) {
-    return preview;
-  }
-  if (output.truncated || preview.length > maxChars) {
-    return `${preview.slice(0, maxChars)}...`;
-  }
-  return preview;
+  return truncateWithEllipsis(stringifyPreviewJson(value), maxChars);
 }
 
 function formatArgsObjectKeyValuePreview(
@@ -576,34 +446,16 @@ function formatArgsObjectKeyValuePreview(
     return undefined;
   }
 
-  const parts: string[] = [];
-  const output = { length: 0, truncated: false };
-  for (let index = 0; index < entries.length; index += 1) {
-    const [key, entryValue] = entries[index];
-    if (index > 0) {
-      appendPreviewText(" ", parts, output, maxChars);
-    }
-    appendPreviewText(formatPreviewKey(key, maxChars), parts, output, maxChars);
-    appendPreviewText("=", parts, output, maxChars);
-    appendPreviewText(
-      formatPreviewValue(entryValue, maxChars),
-      parts,
-      output,
-      maxChars,
-    );
-    if (output.truncated) {
-      break;
-    }
-  }
+  const preview = entries
+    .map(
+      ([key, entryValue]) =>
+        `${formatPreviewKey(key, maxChars)}=${formatPreviewValue(entryValue, maxChars)}`,
+    )
+    .join(" ");
 
-  const preview = parts.join("");
-  if (preview.length === 0) {
-    return undefined;
-  }
-  if (output.truncated || preview.length > maxChars) {
-    return `${preview.slice(0, maxChars)}...`;
-  }
-  return preview;
+  return preview.length > 0
+    ? truncateWithEllipsis(preview, maxChars)
+    : undefined;
 }
 
 function formatCallArgsPreview(
