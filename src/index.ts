@@ -6,7 +6,12 @@ import {
   formatSize,
   keyHint,
 } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import {
+  Text,
+  truncateToWidth,
+  type Component,
+  visibleWidth,
+} from "@mariozechner/pi-tui";
 import { createRuntime, type Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
@@ -136,24 +141,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     },
 
     renderCall(args, theme) {
-      let text = theme.fg("toolTitle", theme.bold("mcporter"));
-      text += ` ${theme.fg("accent", args.action)}`;
-
-      if (
-        (args.action === "describe" || args.action === "call") &&
-        typeof args.selector === "string" &&
-        args.selector.trim().length > 0
-      ) {
-        text += ` ${theme.fg("muted", args.selector.trim())}`;
-      } else if (
-        args.action === "search" &&
-        typeof args.query === "string" &&
-        args.query.trim().length > 0
-      ) {
-        text += ` ${theme.fg("muted", `"${cleanSingleLine(args.query).slice(0, 80)}"`)}`;
-      }
-
-      return new Text(text, 0, 0);
+      return renderCallHeader(args as McporterParams, theme);
     },
 
     renderResult(result, { expanded, isPartial }, theme) {
@@ -321,8 +309,178 @@ function getExpandHint(): string {
   }
 }
 
+function renderCallHeader(params: McporterParams, theme: Theme): Component {
+  return {
+    invalidate() {},
+    render(width) {
+      let header = theme.fg("toolTitle", theme.bold("mcporter"));
+      header += ` ${theme.fg("accent", params.action)}`;
+
+      if (
+        (params.action === "describe" || params.action === "call") &&
+        typeof params.selector === "string" &&
+        params.selector.trim().length > 0
+      ) {
+        header += ` ${theme.fg("muted", params.selector.trim())}`;
+      } else if (
+        params.action === "search" &&
+        typeof params.query === "string" &&
+        params.query.trim().length > 0
+      ) {
+        header += ` ${theme.fg("muted", `"${cleanSingleLine(params.query).slice(0, 80)}"`)}`;
+      }
+
+      const lines: string[] = [];
+      const headerLine = truncateToWidth(header, width);
+      lines.push(
+        headerLine + " ".repeat(Math.max(0, width - visibleWidth(headerLine))),
+      );
+
+      if (params.action === "call") {
+        const previewWidth = Math.max(0, width - 2);
+        const callArgsPreview = formatCallArgsPreview(params, previewWidth);
+        if (callArgsPreview) {
+          const previewLine = truncateToWidth(
+            `  ${theme.fg("muted", callArgsPreview)}`,
+            width,
+          );
+          lines.push(
+            previewLine +
+              " ".repeat(Math.max(0, width - visibleWidth(previewLine))),
+          );
+        }
+      }
+
+      return lines;
+    },
+  };
+}
+
+function isBarePreviewToken(value: string): boolean {
+  return /^[A-Za-z0-9._:/@-]+$/.test(value);
+}
+
+function truncateWithEllipsis(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars)}...`;
+}
+
+function stringifyPreviewJson(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    const json = JSON.stringify(value, (_key, currentValue) => {
+      if (typeof currentValue === "bigint") {
+        return null;
+      }
+      if (typeof currentValue === "number" && !Number.isFinite(currentValue)) {
+        return null;
+      }
+      if (
+        currentValue === undefined ||
+        typeof currentValue === "function" ||
+        typeof currentValue === "symbol"
+      ) {
+        return null;
+      }
+      if (typeof currentValue === "object" && currentValue !== null) {
+        if (seen.has(currentValue)) {
+          return "[Circular]";
+        }
+        seen.add(currentValue);
+      }
+      return currentValue;
+    });
+    return json ?? "null";
+  } catch {
+    return "null";
+  }
+}
+
+function formatPreviewString(value: string, maxChars: number): string {
+  if (value.length > 0 && isBarePreviewToken(value)) {
+    return truncateWithEllipsis(value, maxChars);
+  }
+  return formatJsonValuePreview(value, maxChars);
+}
+
+function formatPreviewKey(key: string, maxChars: number): string {
+  if (key.length > 0 && isBarePreviewToken(key)) {
+    return truncateWithEllipsis(key, maxChars);
+  }
+  return formatJsonValuePreview(key, maxChars);
+}
+
+function formatPreviewValue(value: unknown, maxChars: number): string {
+  if (value === null) {
+    return "null";
+  }
+
+  switch (typeof value) {
+    case "string":
+      return formatPreviewString(value, maxChars);
+    case "number":
+      return Number.isFinite(value) ? String(value) : "null";
+    case "boolean":
+      return value ? "true" : "false";
+    case "bigint":
+      return "null";
+    case "object":
+      return formatJsonValuePreview(value, maxChars);
+    default:
+      return "null";
+  }
+}
+
+function formatJsonValuePreview(value: unknown, maxChars: number): string {
+  return truncateWithEllipsis(stringifyPreviewJson(value), maxChars);
+}
+
+function formatArgsObjectKeyValuePreview(
+  value: Record<string, unknown>,
+  maxChars: number,
+): string | undefined {
+  const entries = Object.entries(value);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  const preview = entries
+    .map(
+      ([key, entryValue]) =>
+        `${formatPreviewKey(key, maxChars)}=${formatPreviewValue(entryValue, maxChars)}`,
+    )
+    .join(" ");
+
+  return preview.length > 0
+    ? truncateWithEllipsis(preview, maxChars)
+    : undefined;
+}
+
+function formatCallArgsPreview(
+  params: McporterParams,
+  maxChars: number,
+): string | undefined {
+  if (maxChars <= 0) {
+    return undefined;
+  }
+
+  const argsResult = parseCallArgs(params);
+  if ("error" in argsResult || Object.keys(argsResult.args).length === 0) {
+    return undefined;
+  }
+
+  try {
+    return formatArgsObjectKeyValuePreview(argsResult.args, maxChars);
+  } catch {
+    return undefined;
+  }
+}
+
 export const __test__ = {
   clampLimit,
+  formatCallArgsPreview,
   levenshtein,
   parseCallArgs,
   parseSelector,

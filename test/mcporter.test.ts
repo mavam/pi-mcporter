@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import mcporterExtension from "../src/index.ts";
+import mcporterExtension, { __test__ } from "../src/index.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
 
 describe("mcporter renderer", () => {
@@ -116,6 +116,108 @@ describe("mcporter renderer", () => {
     expect(collapsed).not.toContain("full output");
     expect(expanded).toContain("full output");
   });
+
+  it("shows compact call args in the call header", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: { team: "PI", limit: 10, state: "Todo" },
+        },
+        createTheme(),
+      ),
+      120,
+    );
+
+    expect(rendered).toContain("mcporter call linear.list_issues");
+    expect(rendered).toContain("\n  team=PI limit=10 state=Todo");
+  });
+
+  it("sizes call arg previews to the available width", () => {
+    const { tool } = createExtensionHarness();
+
+    const wide = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: {
+            assignee: "me",
+            limit: 100,
+            orderBy: "updatedAt",
+            includeArchived: false,
+          },
+        },
+        createTheme(),
+      ),
+      120,
+    );
+    const narrow = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: {
+            assignee: "me",
+            limit: 100,
+            orderBy: "updatedAt",
+            includeArchived: false,
+          },
+        },
+        createTheme(),
+      ),
+      50,
+    );
+
+    expect(wide).toContain("assignee=me");
+    expect(wide).toContain("orderBy=updatedAt");
+    expect(wide).toContain("includeArchived=false");
+    expect(narrow).toContain("mcporter call linear.list_issues");
+    expect(narrow).toContain("assignee=me");
+    expect(narrow).toContain("...");
+    expect(narrow).not.toContain("includeArchived=false");
+  });
+
+  it("renders multiline array argsJson previews as a single header line", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "items": [\n    1,\n    2\n  ],\n  "nested": {\n    "ok": true\n  }\n}',
+        },
+        createTheme(),
+      ),
+      120,
+    );
+
+    expect(rendered.split("\n")).toHaveLength(2);
+    expect(rendered).toContain('\n  items=[1,2] nested={"ok":true}');
+  });
+
+  it("omits empty call args from the call header", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "linear.list_issues",
+          args: {},
+        },
+        createTheme(),
+      ),
+      120,
+    );
+
+    expect(rendered).toBe("mcporter call linear.list_issues");
+  });
 });
 
 describe("call output formatting", () => {
@@ -160,8 +262,71 @@ describe("call output formatting", () => {
   });
 });
 
+describe("call args preview formatting", () => {
+  it("formats argsJson as compact single-line JSON", () => {
+    expect(
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson: '{\n  "team": "PI",\n  "limit": 10\n}',
+        },
+        40,
+      ),
+    ).toBe("team=PI limit=10");
+  });
+
+  it("preserves whitespace inside string literals", () => {
+    expect(
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "query": "  keep   internal spaces  ",\n  "regex": "^foo  bar$"\n}',
+        },
+        40,
+      ),
+    ).toBe('query="  keep   internal spaces  " regex...');
+  });
+
+  it("compacts multiline array values in argsJson", () => {
+    expect(
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "items": [\n    1,\n    2\n  ],\n  "nested": {\n    "ok": true\n  }\n}',
+        },
+        40,
+      ),
+    ).toBe('items=[1,2] nested={"ok":true}');
+  });
+
+  it("truncates long args previews", () => {
+    expect(
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          args: {
+            query:
+              "this is a deliberately long string that should be truncated",
+          },
+        },
+        40,
+      ),
+    ).toBe('query="this is a deliberately long strin...');
+  });
+});
+
 function createExtensionHarness(): {
   tool: {
+    renderCall: (
+      args: unknown,
+      theme: ReturnType<typeof createTheme>,
+    ) => { render: (width: number) => string[] };
     renderResult: (
       result: unknown,
       options: { expanded: boolean; isPartial: boolean },
@@ -171,6 +336,10 @@ function createExtensionHarness(): {
 } {
   let tool:
     | {
+        renderCall: (
+          args: unknown,
+          theme: ReturnType<typeof createTheme>,
+        ) => { render: (width: number) => string[] };
         renderResult: (
           result: unknown,
           options: { expanded: boolean; isPartial: boolean },
@@ -214,8 +383,11 @@ function createTheme() {
   };
 }
 
-function renderComponentText(component: {
-  render: (width: number) => string[];
-}): string {
-  return component.render(120).join("\n").trim();
+function renderComponentText(
+  component: {
+    render: (width: number) => string[];
+  },
+  width: number = 120,
+): string {
+  return component.render(width).join("\n").trim();
 }
