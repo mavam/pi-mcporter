@@ -76,6 +76,14 @@ Tool name: `mcporter`
 - `--mcporter-config <path>`: explicit MCPorter config path (overrides `MCPORTER_CONFIG` env var and default locations)
 - `--mcporter-timeout-ms <ms>`: default call timeout in milliseconds (default `30000`)
 
+## 🪄 Output behavior
+
+Tool output follows pi's native expand/collapse behavior:
+
+- Collapsed view shows a compact summary
+- Expanded view shows the full rendered output
+- Use pi's `expandTools` keybinding (default `Ctrl+O`) to toggle expansion
+
 ## 🧯 Troubleshooting
 
 - **Unknown server/tool**: run `npx mcporter list` and `npx mcporter list <server>` to verify names.

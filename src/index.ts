@@ -1,17 +1,19 @@
 import { readFile } from "node:fs/promises";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
+	keyHint,
 } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { createRuntime, type Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
 import { handleSearchAction } from "./actions/search.js";
 import { CatalogStore } from "./catalog-store.js";
 import { DEFAULT_CALL_TIMEOUT_MS } from "./constants.js";
-import { textContent, toErrorMessage } from "./helpers.js";
+import { cleanSingleLine, textContent, toErrorMessage } from "./helpers.js";
 import {
 	clampLimit,
 	parseCallArgs,
@@ -20,6 +22,7 @@ import {
 } from "./inputs.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
+import type { ToolDetails } from "./types.js";
 
 const PACKAGE_VERSION: string = await readFile(
 	new URL("../package.json", import.meta.url),
@@ -54,6 +57,8 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 					`mcporter extension: ${toErrorMessage(error)}`,
 					"warning",
 				);
+			} else {
+				emitStderrNotice(`mcporter extension: ${toErrorMessage(error)}`);
 			}
 		}
 	});
@@ -129,6 +134,66 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 					);
 			}
 		},
+
+		renderCall(args, theme) {
+			let text = theme.fg("toolTitle", theme.bold("mcporter"));
+			text += ` ${theme.fg("accent", args.action)}`;
+
+			if (
+				(args.action === "describe" || args.action === "call") &&
+				typeof args.selector === "string" &&
+				args.selector.trim().length > 0
+			) {
+				text += ` ${theme.fg("muted", args.selector.trim())}`;
+			} else if (
+				args.action === "search" &&
+				typeof args.query === "string" &&
+				args.query.trim().length > 0
+			) {
+				text += ` ${theme.fg("muted", `"${cleanSingleLine(args.query).slice(0, 80)}"`)}`;
+			}
+
+			return new Text(text, 0, 0);
+		},
+
+		renderResult(result, { expanded, isPartial }, theme) {
+			const details = result.details as ToolDetails | undefined;
+			const text = extractTextContent(result.content);
+			const isError = Boolean((result as { isError?: boolean }).isError);
+
+			if (isPartial) {
+				return renderSimpleText(text ?? "Working…", theme, "warning");
+			}
+
+			if (isError) {
+				return renderBlockText(text ?? "mcporter failed", theme, "error");
+			}
+
+			if (!details) {
+				return renderBlockText(text ?? "", theme, "toolOutput");
+			}
+
+			if (details.action !== "call") {
+				if (expanded) {
+					return renderBlockText(text ?? "", theme, "toolOutput");
+				}
+				return renderCollapsedActionSummary(details, text, theme);
+			}
+
+			if (expanded) {
+				return renderBlockText(text ?? "", theme, "toolOutput");
+			}
+
+			const summary =
+				details.callOutputSummary ??
+				`${details.selector ?? "mcporter call"}: output available`;
+			let summaryText = theme.fg("success", summary);
+			summaryText += theme.fg(
+				"muted",
+				` (${getExpandHint()})`,
+			);
+			return new Text(summaryText, 0, 0);
+		},
 	});
 
 	function resolveConfiguredPath(): string | undefined {
@@ -171,6 +236,94 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 			override,
 			typeof flagValue === "string" ? flagValue : undefined,
 		);
+	}
+}
+
+function emitStderrNotice(message: string): void {
+	process.stderr.write(`${message}\n`);
+}
+
+function extractTextContent(
+	content: Array<{ type: string; text?: string }> | undefined,
+): string | undefined {
+	if (!content || content.length === 0) {
+		return undefined;
+	}
+	const text = content
+		.filter((item) => item.type === "text" && typeof item.text === "string")
+		.map((item) => item.text?.trimEnd() ?? "")
+		.join("\n")
+		.trim();
+	return text.length > 0 ? text : undefined;
+}
+
+function renderBlockText(
+	text: string,
+	theme: Pick<Theme, "fg">,
+	color: "toolOutput" | "error",
+): Text {
+	if (!text) {
+		return new Text("", 0, 0);
+	}
+	const rendered = text
+		.split("\n")
+		.map((line) => theme.fg(color, line))
+		.join("\n");
+	return new Text(`\n${rendered}`, 0, 0);
+}
+
+function renderSimpleText(
+	text: string,
+	theme: Pick<Theme, "fg">,
+	color: "warning" | "muted" | "success",
+): Text {
+	return new Text(theme.fg(color, text), 0, 0);
+}
+
+function renderCollapsedActionSummary(
+	details: ToolDetails,
+	text: string | undefined,
+	theme: Pick<Theme, "fg">,
+): Text {
+	const summary = getCollapsedActionSummary(details, text);
+	let summaryText = theme.fg("success", summary);
+	summaryText += theme.fg(
+		"muted",
+		` (${getExpandHint()})`,
+	);
+	return new Text(summaryText, 0, 0);
+}
+
+function getCollapsedActionSummary(
+	details: ToolDetails,
+	text: string | undefined,
+): string {
+	switch (details.action) {
+		case "describe":
+			return `${details.selector ?? "mcporter describe"} schema available`;
+		case "search":
+			return getFirstLine(text) ?? "mcporter search results available";
+		case "call":
+			return (
+				details.callOutputSummary ??
+				`${details.selector ?? "mcporter call"}: output available`
+			);
+	}
+}
+
+function getFirstLine(text: string | undefined): string | undefined {
+	if (!text) {
+		return undefined;
+	}
+	const firstLine = text.split("\n", 1)[0]?.trim();
+	return firstLine && firstLine.length > 0 ? firstLine : undefined;
+}
+
+function getExpandHint(): string {
+	try {
+		return keyHint("expandTools", "to expand");
+	} catch {
+		return "to expand";
 	}
 }
 

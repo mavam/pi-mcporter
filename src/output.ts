@@ -10,16 +10,29 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { wrapCallResult } from "mcporter";
 import { renderSchemaSnippet } from "./schema.js";
-import type { OutputShape } from "./types.js";
+import type {
+	McporterCallOutputKind,
+	OutputShape,
+} from "./types.js";
 
-export function formatCallOutput(selector: string, rawResult: unknown): string {
+export interface FormattedCallOutput {
+	text: string;
+	kind: McporterCallOutputKind;
+}
+
+export function formatCallOutput(
+	selector: string,
+	rawResult: unknown,
+): FormattedCallOutput {
 	const wrapped = wrapCallResult(rawResult).callResult;
 	const lines: string[] = [];
 
 	lines.push(`Called ${selector} successfully.`);
 
 	const text = wrapped.text();
+	let kind: McporterCallOutputKind = "raw";
 	if (text && text.trim().length > 0) {
+		kind = "text";
 		lines.push("");
 		lines.push("Text response:");
 		lines.push(text.trim());
@@ -27,12 +40,18 @@ export function formatCallOutput(selector: string, rawResult: unknown): string {
 
 	const structured = wrapped.structuredContent();
 	if (structured !== null && structured !== undefined) {
+		if (kind === "raw") {
+			kind = "structured";
+		}
 		lines.push("");
 		lines.push("Structured content snippet:");
 		lines.push(renderSchemaSnippet(structured));
 	} else {
 		const parsedJson = wrapped.json();
 		if (parsedJson !== null && parsedJson !== undefined) {
+			if (kind === "raw") {
+				kind = "json";
+			}
 			lines.push("");
 			lines.push("JSON payload snippet:");
 			lines.push(renderSchemaSnippet(parsedJson));
@@ -45,7 +64,16 @@ export function formatCallOutput(selector: string, rawResult: unknown): string {
 		lines.push(renderSchemaSnippet(rawResult));
 	}
 
-	return lines.join("\n");
+	return { text: lines.join("\n"), kind };
+}
+
+export function summarizeCallOutput(
+	selector: string,
+	kind: McporterCallOutputKind,
+	truncated = false,
+): string {
+	const base = `${selector}: ${describeCallOutputKind(kind)}`;
+	return truncated ? `${base} [truncated]` : base;
 }
 
 export async function shapeOutput(output: string): Promise<OutputShape> {
@@ -80,6 +108,20 @@ async function shapeWithStrategy(
 	text += ` Full output saved to: ${fullOutputPath}]`;
 
 	return { text, truncation, fullOutputPath };
+}
+
+function describeCallOutputKind(kind: McporterCallOutputKind): string {
+	switch (kind) {
+		case "text":
+			return "text output";
+		case "structured":
+			return "structured output";
+		case "json":
+			return "JSON output";
+		case "raw":
+		default:
+			return "raw result";
+	}
 }
 
 async function writeTempText(content: string): Promise<string> {
