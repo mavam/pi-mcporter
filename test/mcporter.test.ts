@@ -181,6 +181,26 @@ describe("mcporter renderer", () => {
     expect(narrow).not.toContain("includeArchived=false");
   });
 
+  it("renders multiline array argsJson previews as a single header line", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "items": [\n    1,\n    2\n  ],\n  "nested": {\n    "ok": true\n  }\n}',
+        },
+        createTheme(),
+      ),
+      120,
+    );
+
+    expect(rendered.split("\n")).toHaveLength(2);
+    expect(rendered).toContain('\n  items=[1,2] nested={"ok":true}');
+  });
+
   it("omits empty call args from the call header", () => {
     const { tool } = createExtensionHarness();
 
@@ -262,6 +282,17 @@ describe("call args preview formatting", () => {
           '{\n  "query": "  keep   internal spaces  ",\n  "regex": "^foo  bar$"\n}',
       }),
     ).toBe('query="  keep   internal spaces  " regex...');
+  });
+
+  it("compacts multiline array values in argsJson", () => {
+    expect(
+      __test__.formatCallArgsPreview({
+        action: "call",
+        selector: "demo.echo",
+        argsJson:
+          '{\n  "items": [\n    1,\n    2\n  ],\n  "nested": {\n    "ok": true\n  }\n}',
+      }),
+    ).toBe('items=[1,2] nested={"ok":true}');
   });
 
   it("truncates long args previews", () => {

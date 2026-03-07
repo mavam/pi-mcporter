@@ -615,12 +615,12 @@ function formatArgsObjectPreview(
   return formatJsonValuePreview(value, maxChars);
 }
 
-function formatArgsJsonPreview(
+function formatCompactJsonContainerPreview(
   raw: string,
   maxChars: number,
 ): string | undefined {
   const trimmed = raw.trim();
-  if (trimmed.length === 0 || !trimmed.startsWith("{")) {
+  if (trimmed.length === 0 || (trimmed[0] !== "{" && trimmed[0] !== "[")) {
     return undefined;
   }
 
@@ -671,6 +671,22 @@ function formatArgsJsonPreview(
   }
   if (truncated || preview.length > maxChars) {
     return `${preview.slice(0, maxChars)}...`;
+  }
+  return preview;
+}
+
+function formatArgsJsonPreview(
+  raw: string,
+  maxChars: number,
+): string | undefined {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || !trimmed.startsWith("{")) {
+    return undefined;
+  }
+
+  const preview = formatCompactJsonContainerPreview(trimmed, maxChars);
+  if (preview === "{}") {
+    return undefined;
   }
   return preview;
 }
@@ -767,11 +783,11 @@ function formatRawJsonValuePreview(rawValue: string, maxChars: number): string {
     try {
       return formatPreviewString(JSON.parse(rawValue) as string, maxChars);
     } catch {
-      return formatArgsJsonPreview(rawValue, maxChars) ?? rawValue;
+      return formatCompactJsonContainerPreview(rawValue, maxChars) ?? rawValue;
     }
   }
 
-  return formatArgsJsonPreview(rawValue, maxChars) ?? rawValue;
+  return formatCompactJsonContainerPreview(rawValue, maxChars) ?? rawValue;
 }
 
 function formatArgsJsonKeyValuePreview(
