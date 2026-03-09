@@ -18,7 +18,6 @@ import { handleDescribeAction } from "./actions/describe.js";
 import { handleSearchAction } from "./actions/search.js";
 import { formatCallArgsPreview } from "./call-args-preview.js";
 import { CatalogStore } from "./catalog-store.js";
-import { DEFAULT_CALL_TIMEOUT_MS } from "./constants.js";
 import { cleanSingleLine, textContent, toErrorMessage } from "./helpers.js";
 import { registerHoistedTools } from "./hoisted-tools.js";
 import {
@@ -35,6 +34,11 @@ import {
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
 import { preloadCatalogForMode } from "./startup.js";
+import {
+  getDefaultMcporterSettings,
+  loadMcporterSettings,
+  type McporterSettings,
+} from "./settings.js";
 import { withPromptMetadata } from "./tool-registration.js";
 import type { ToolDetails } from "./types.js";
 
@@ -49,27 +53,10 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   let runtime: Runtime | undefined;
   let runtimePromise: Promise<Runtime> | undefined;
   let preloadPromise: Promise<void> | undefined;
+  let settings = getDefaultMcporterSettings();
+  let settingsPromise: Promise<McporterSettings> | undefined;
   const catalogStore = new CatalogStore();
   const registeredHoistedSelectors = new Set<string>();
-
-  pi.registerFlag("mcporter-config", {
-    description:
-      "Path to mcporter.json (overrides MCPORTER_CONFIG and defaults)",
-    type: "string",
-  });
-
-  pi.registerFlag("mcporter-timeout-ms", {
-    description: `Default timeout for mcporter call action in milliseconds (default ${DEFAULT_CALL_TIMEOUT_MS})`,
-    type: "string",
-    default: String(DEFAULT_CALL_TIMEOUT_MS),
-  });
-
-  pi.registerFlag("mcporter-mode", {
-    description:
-      "MCP tool visibility mode: 'lazy' keeps only on-demand discovery, 'eager' preloads MCP catalogs through the mcporter proxy tool, and 'hoist' eagerly registers MCP tools as first-class pi tools.",
-    type: "string",
-    default: "lazy",
-  });
 
   pi.on("session_start", async (_event, ctx) => {
     try {
@@ -102,6 +89,8 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     runtime = undefined;
     runtimePromise = undefined;
     preloadPromise = undefined;
+    settings = getDefaultMcporterSettings();
+    settingsPromise = undefined;
     catalogStore.clear();
     registeredHoistedSelectors.clear();
 
@@ -224,7 +213,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   );
 
   function resolveMode() {
-    return resolveMcporterMode(pi.getFlag("mcporter-mode"));
+    return settings.mode;
   }
 
   function ensurePreload(
@@ -232,14 +221,19 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     notifyWarning: (message: string) => void,
   ): Promise<void> | undefined {
     const mode = resolveMode();
-    if (!shouldPreloadCatalog(mode)) {
+    if (!shouldPreloadCatalog(mode, settings.serverModes)) {
       return undefined;
     }
 
     if (!preloadPromise) {
-      preloadPromise = preloadCatalogForMode(activeRuntime, catalogStore, mode)
+      preloadPromise = preloadCatalogForMode(
+        activeRuntime,
+        catalogStore,
+        mode,
+        settings.serverModes,
+      )
         .then((summary) => {
-          if (shouldHoistTools(mode) && summary.hoistedTools.length > 0) {
+          if (summary.hoistedTools.length > 0) {
             registerHoistedTools(
               pi,
               activeRuntime,
@@ -265,16 +259,22 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     return preloadPromise;
   }
 
-  function resolveConfiguredPath(): string | undefined {
-    const explicit = pi.getFlag("mcporter-config");
-    if (typeof explicit === "string" && explicit.trim().length > 0) {
-      return explicit.trim();
+  async function ensureSettings(): Promise<McporterSettings> {
+    if (settingsPromise) {
+      return await settingsPromise;
     }
-    const env = process.env.MCPORTER_CONFIG;
-    if (typeof env === "string" && env.trim().length > 0) {
-      return env.trim();
-    }
-    return undefined;
+
+    settingsPromise = loadMcporterSettings()
+      .then((loaded) => {
+        settings = loaded;
+        return loaded;
+      })
+      .catch((error) => {
+        settingsPromise = undefined;
+        throw error;
+      });
+
+    return await settingsPromise;
   }
 
   async function ensureRuntime(): Promise<Runtime> {
@@ -282,11 +282,15 @@ export default function mcporterExtension(pi: ExtensionAPI) {
       return runtime;
     }
     if (!runtimePromise) {
-      const configPath = resolveConfiguredPath();
-      runtimePromise = createRuntime({
-        ...(configPath ? { configPath } : {}),
-        clientInfo: { name: "pi-mcporter", version: PACKAGE_VERSION },
-      })
+      runtimePromise = ensureSettings()
+        .then((loadedSettings) =>
+          createRuntime({
+            ...(loadedSettings.configPath
+              ? { configPath: loadedSettings.configPath }
+              : {}),
+            clientInfo: { name: "pi-mcporter", version: PACKAGE_VERSION },
+          }),
+        )
         .then((created) => {
           runtime = created;
           return created;
@@ -300,11 +304,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   }
 
   function resolveCallTimeout(override?: number): number {
-    const flagValue = pi.getFlag("mcporter-timeout-ms");
-    return resolveCallTimeoutFromInputs(
-      override,
-      typeof flagValue === "string" ? flagValue : undefined,
-    );
+    return resolveCallTimeoutFromInputs(override, String(settings.timeoutMs));
   }
 }
 

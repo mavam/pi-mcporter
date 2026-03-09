@@ -1,7 +1,7 @@
 import type { Runtime } from "mcporter";
 import type { CatalogStore } from "./catalog-store.js";
 import { toErrorMessage } from "./helpers.js";
-import { type McporterMode, shouldHoistTools } from "./mode.js";
+import { resolveServerMode, type McporterMode } from "./mode.js";
 import type { CatalogTool } from "./types.js";
 
 export interface PreloadSummary {
@@ -16,40 +16,36 @@ export async function preloadCatalogForMode(
   activeRuntime: Runtime,
   catalogStore: CatalogStore,
   mode: McporterMode,
+  serverModes: Readonly<Record<string, McporterMode>> = {},
 ): Promise<PreloadSummary> {
   const servers = activeRuntime.listServers();
-  if (!shouldHoistTools(mode)) {
-    const catalog = await catalogStore.getBasicCatalog(activeRuntime);
-    const warnedServers = new Set(
-      catalog.warnings
-        .map((warning) => warning.split(":", 1)[0]?.trim())
-        .filter((server): server is string => Boolean(server)),
-    );
-
-    return {
-      mode,
-      serverCount: catalog.servers.length,
-      warmedServers: catalog.servers.filter((server) => !warnedServers.has(server)),
-      hoistedTools: [],
-      warnings: [...catalog.warnings].sort((a, b) => a.localeCompare(b)),
-    };
-  }
-
   const warnings: string[] = [];
   const warmedServers: string[] = [];
   const hoistedTools: CatalogTool[] = [];
 
   await Promise.all(
     servers.map(async (server) => {
+      const serverMode = resolveServerMode(mode, serverModes, server);
+      if (serverMode === "lazy") {
+        return;
+      }
+
       try {
-        const tools = await catalogStore.getServerCatalogWithSchema(
-          activeRuntime,
-          server,
-        );
+        const tools =
+          serverMode === "hoist"
+            ? await catalogStore.getServerCatalogWithSchema(
+                activeRuntime,
+                server,
+              )
+            : await catalogStore.getServerCatalogBasic(activeRuntime, server);
         warmedServers.push(server);
-        hoistedTools.push(...tools);
+        if (serverMode === "hoist") {
+          hoistedTools.push(...tools);
+        }
       } catch (error) {
-        catalogStore.dropSchemaServer(server);
+        if (serverMode === "hoist") {
+          catalogStore.dropSchemaServer(server);
+        }
         warnings.push(`${server}: ${toErrorMessage(error)}`);
       }
     }),

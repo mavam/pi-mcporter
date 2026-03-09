@@ -71,14 +71,29 @@ Tool name: `mcporter`
 - `argsJson?`: JSON-object-string fallback for `call`
 - `timeoutMs?`: per-call timeout override
 
-## ⚙️ Optional flags
+## ⚙️ Configuration
 
-- `--mcporter-config <path>`: explicit MCPorter config path (overrides `MCPORTER_CONFIG` env var and default locations)
-- `--mcporter-timeout-ms <ms>`: default call timeout in milliseconds (default `30000`)
-- `--mcporter-mode <lazy|eager|hoist>`: MCP tool visibility mode
-  - `lazy`: current behavior, only the stable `mcporter` proxy tool is visible and MCP metadata loads on demand
+Configure the extension in `~/.pi/agent/mcporter.json`:
+
+```json
+{
+  "configPath": "/absolute/path/to/mcporter.json",
+  "timeoutMs": 30000,
+  "mode": "lazy",
+  "serverModes": {
+    "linear": "hoist",
+    "slack": "eager"
+  }
+}
+```
+
+- `configPath`: optional explicit MCPorter config path. If omitted, MCPorter uses its normal default resolution.
+- `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
+- `mode`: optional default MCP tool visibility mode.
+  - `lazy`: only the stable `mcporter` proxy tool is visible and MCP metadata loads on demand
   - `eager`: still only exposes `mcporter`, but preloads MCP tool metadata on startup so the agent can skip unnecessary discovery more often
   - `hoist`: eagerly loads MCP metadata and registers MCP tools as first-class pi tools in addition to `mcporter`
+- `serverModes`: optional per-server overrides for `mode`, keyed by MCP server name.
 
 ## 🪄 Output behavior
 
@@ -92,8 +107,8 @@ Tool output follows pi's native expand/collapse behavior:
 
 - **Unknown server/tool**: run `npx mcporter list` and `npx mcporter list <server>` to verify names.
 - **Auth issues**: run `npx mcporter auth <server>`.
-- **Slow calls**: increase `timeoutMs` or `--mcporter-timeout-ms`.
-- **Config not found**: set `--mcporter-config <path>` or export `MCPORTER_CONFIG=<path>`.
+- **Slow calls**: increase `timeoutMs` in `~/.pi/agent/mcporter.json` or override `timeoutMs` per tool call.
+- **Config not found**: set `configPath` in `~/.pi/agent/mcporter.json`.
 - **Truncated output**: the response includes a temp file path with full output.
 
 ## 📄 License

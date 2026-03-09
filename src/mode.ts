@@ -2,14 +2,12 @@ export const MCPORTER_MODES = ["lazy", "eager", "hoist"] as const;
 
 export type McporterMode = (typeof MCPORTER_MODES)[number];
 
-export function resolveMcporterMode(
-  flagValue: boolean | string | undefined,
-): McporterMode {
-  if (typeof flagValue !== "string") {
+export function resolveMcporterMode(value: string | undefined): McporterMode {
+  if (typeof value !== "string") {
     return "lazy";
   }
 
-  const normalized = flagValue.trim().toLowerCase();
+  const normalized = value.trim().toLowerCase();
   if (normalized === "eager" || normalized === "hoist") {
     return normalized;
   }
@@ -17,10 +15,24 @@ export function resolveMcporterMode(
   return "lazy";
 }
 
-export function shouldPreloadCatalog(mode: McporterMode): boolean {
-  return mode !== "lazy";
+export function shouldPreloadCatalog(
+  mode: McporterMode,
+  serverModes: Readonly<Record<string, McporterMode>> = {},
+): boolean {
+  if (mode !== "lazy") {
+    return true;
+  }
+  return Object.values(serverModes).some((serverMode) => serverMode !== "lazy");
 }
 
 export function shouldHoistTools(mode: McporterMode): boolean {
   return mode === "hoist";
+}
+
+export function resolveServerMode(
+  defaultMode: McporterMode,
+  serverModes: Readonly<Record<string, McporterMode>>,
+  server: string,
+): McporterMode {
+  return serverModes[server] ?? defaultMode;
 }

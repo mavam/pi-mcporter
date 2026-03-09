@@ -342,13 +342,16 @@ describe("mode resolution", () => {
 describe("startup preload", () => {
   it("warms the basic catalog in eager mode", async () => {
     const seenOptions: Array<{ includeSchema?: boolean }> = [];
-    const runtime = createRuntimeStub(async (server, options) => {
-      seenOptions.push({ includeSchema: options?.includeSchema });
-      if (server === "beta") {
-        throw new Error("offline");
-      }
-      return [demoTool(server, "list_items")];
-    }, ["alpha", "beta"]);
+    const runtime = createRuntimeStub(
+      async (server, options) => {
+        seenOptions.push({ includeSchema: options?.includeSchema });
+        if (server === "beta") {
+          throw new Error("offline");
+        }
+        return [demoTool(server, "list_items")];
+      },
+      ["alpha", "beta"],
+    );
 
     const summary = await preloadCatalogForMode(
       runtime,
@@ -367,15 +370,18 @@ describe("startup preload", () => {
 
   it("loads schemas for hoist mode", async () => {
     const seenOptions: Array<{ includeSchema?: boolean }> = [];
-    const runtime = createRuntimeStub(async (server, options) => {
-      seenOptions.push({ includeSchema: options?.includeSchema });
-      return [
-        demoTool(server, "list_items", {
-          type: "object",
-          properties: { limit: { type: "number" } },
-        }),
-      ];
-    }, ["alpha"]);
+    const runtime = createRuntimeStub(
+      async (server, options) => {
+        seenOptions.push({ includeSchema: options?.includeSchema });
+        return [
+          demoTool(server, "list_items", {
+            type: "object",
+            properties: { limit: { type: "number" } },
+          }),
+        ];
+      },
+      ["alpha"],
+    );
 
     const summary = await preloadCatalogForMode(
       runtime,
@@ -388,6 +394,42 @@ describe("startup preload", () => {
       "alpha.list_items",
     ]);
     expect(seenOptions).toEqual([{ includeSchema: true }]);
+  });
+
+  it("honors per-server mode overrides", async () => {
+    const seenOptions: Array<{
+      includeSchema?: boolean;
+      server: string;
+    }> = [];
+    const runtime = createRuntimeStub(
+      async (server, options) => {
+        seenOptions.push({
+          server,
+          includeSchema: options?.includeSchema,
+        });
+        return [demoTool(server, "list_items")];
+      },
+      ["alpha", "beta", "gamma"],
+    );
+
+    const summary = await preloadCatalogForMode(
+      runtime,
+      new CatalogStore(),
+      "lazy",
+      {
+        alpha: "eager",
+        beta: "hoist",
+      },
+    );
+
+    expect(summary.warmedServers).toEqual(["alpha", "beta"]);
+    expect(summary.hoistedTools.map((tool) => tool.selector)).toEqual([
+      "beta.list_items",
+    ]);
+    expect(seenOptions).toEqual([
+      { server: "alpha", includeSchema: false },
+      { server: "beta", includeSchema: true },
+    ]);
   });
 });
 
@@ -450,19 +492,10 @@ function createExtensionHarness(): {
         ) => { render: (width: number) => string[] };
       }
     | undefined;
-  const flags = new Map<string, string>();
 
   mcporterExtension({
-    getFlag(name: string) {
-      return flags.get(name);
-    },
     on() {},
     registerCommand() {},
-    registerFlag(name: string, options: { default?: string }) {
-      if (options.default !== undefined) {
-        flags.set(name, options.default);
-      }
-    },
     registerTool(definition: unknown) {
       tool = definition as typeof tool;
     },
