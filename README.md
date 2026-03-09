@@ -81,8 +81,8 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
   "timeoutMs": 30000,
   "mode": "lazy",
   "serverModes": {
-    "linear": "hoist",
-    "slack": "eager"
+    "linear": "direct",
+    "slack": "preload"
   }
 }
 ```
@@ -91,8 +91,8 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
 - `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
 - `mode`: optional default MCP tool visibility mode.
   - `lazy`: only the stable `mcporter` proxy tool is visible and MCP metadata loads on demand
-  - `eager`: still only exposes `mcporter`, but preloads MCP tool metadata on startup so the agent can skip unnecessary discovery more often
-  - `hoist`: eagerly loads MCP metadata and registers MCP tools as first-class pi tools in addition to `mcporter`
+  - `preload`: still only exposes `mcporter`, but preloads MCP tool metadata on startup so the agent can skip unnecessary discovery more often
+  - `direct`: registers MCP tools as first-class pi tools in addition to `mcporter`
 - `serverModes`: optional per-server overrides for `mode`, keyed by MCP server name.
 
 ## 🪄 Output behavior

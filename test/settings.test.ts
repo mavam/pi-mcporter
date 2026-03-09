@@ -31,18 +31,18 @@ describe("mcporter settings", () => {
       normalizeMcporterSettings({
         configPath: "  /tmp/mcporter.json  ",
         timeoutMs: 45_000,
-        mode: "HOIST",
+        mode: "DIRECT",
         serverModes: {
-          linear: "eager",
+          linear: "preload",
           slack: "LAZY",
         },
       }),
     ).toEqual({
       configPath: "/tmp/mcporter.json",
       timeoutMs: 45_000,
-      mode: "hoist",
+      mode: "direct",
       serverModes: {
-        linear: "eager",
+        linear: "preload",
         slack: "lazy",
       },
     });
@@ -56,7 +56,7 @@ describe("mcporter settings", () => {
         mode: "surprise",
         serverModes: {
           linear: "surprise",
-          "   ": "hoist",
+          "   ": "direct",
           github: 123,
         },
       }),
@@ -66,6 +66,24 @@ describe("mcporter settings", () => {
       mode: "lazy",
       serverModes: {
         linear: "lazy",
+      },
+    });
+  });
+
+  it("accepts legacy eager and hoist aliases", () => {
+    expect(
+      normalizeMcporterSettings({
+        mode: "hoist",
+        serverModes: {
+          linear: "eager",
+        },
+      }),
+    ).toEqual({
+      configPath: undefined,
+      timeoutMs: 30_000,
+      mode: "direct",
+      serverModes: {
+        linear: "preload",
       },
     });
   });

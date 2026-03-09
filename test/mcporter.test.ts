@@ -329,9 +329,14 @@ describe("mode resolution", () => {
     expect(__test__.resolveMcporterMode(undefined)).toBe("lazy");
   });
 
-  it("accepts eager and hoist", () => {
-    expect(__test__.resolveMcporterMode("eager")).toBe("eager");
-    expect(__test__.resolveMcporterMode("HOIST")).toBe("hoist");
+  it("accepts preload and direct", () => {
+    expect(__test__.resolveMcporterMode("preload")).toBe("preload");
+    expect(__test__.resolveMcporterMode("DIRECT")).toBe("direct");
+  });
+
+  it("accepts legacy eager and hoist aliases", () => {
+    expect(__test__.resolveMcporterMode("eager")).toBe("preload");
+    expect(__test__.resolveMcporterMode("HOIST")).toBe("direct");
   });
 
   it("falls back to lazy for unknown values", () => {
@@ -340,7 +345,7 @@ describe("mode resolution", () => {
 });
 
 describe("startup preload", () => {
-  it("warms the basic catalog in eager mode", async () => {
+  it("warms the basic catalog in preload mode", async () => {
     const seenOptions: Array<{ includeSchema?: boolean }> = [];
     const runtime = createRuntimeStub(
       async (server, options) => {
@@ -356,7 +361,7 @@ describe("startup preload", () => {
     const summary = await preloadCatalogForMode(
       runtime,
       new CatalogStore(),
-      "eager",
+      "preload",
     );
 
     expect(summary.warmedServers).toEqual(["alpha"]);
@@ -368,7 +373,7 @@ describe("startup preload", () => {
     ]);
   });
 
-  it("loads schemas for hoist mode", async () => {
+  it("loads schemas for direct mode", async () => {
     const seenOptions: Array<{ includeSchema?: boolean }> = [];
     const runtime = createRuntimeStub(
       async (server, options) => {
@@ -386,7 +391,7 @@ describe("startup preload", () => {
     const summary = await preloadCatalogForMode(
       runtime,
       new CatalogStore(),
-      "hoist",
+      "direct",
     );
 
     expect(summary.warmedServers).toEqual(["alpha"]);
@@ -417,8 +422,8 @@ describe("startup preload", () => {
       new CatalogStore(),
       "lazy",
       {
-        alpha: "eager",
-        beta: "hoist",
+        alpha: "preload",
+        beta: "direct",
       },
     );
 

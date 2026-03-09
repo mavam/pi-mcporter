@@ -32,18 +32,18 @@ export async function preloadCatalogForMode(
 
       try {
         const tools =
-          serverMode === "hoist"
+          serverMode === "direct"
             ? await catalogStore.getServerCatalogWithSchema(
                 activeRuntime,
                 server,
               )
             : await catalogStore.getServerCatalogBasic(activeRuntime, server);
         warmedServers.push(server);
-        if (serverMode === "hoist") {
+        if (serverMode === "direct") {
           hoistedTools.push(...tools);
         }
       } catch (error) {
-        if (serverMode === "hoist") {
+        if (serverMode === "direct") {
           catalogStore.dropSchemaServer(server);
         }
         warnings.push(`${server}: ${toErrorMessage(error)}`);

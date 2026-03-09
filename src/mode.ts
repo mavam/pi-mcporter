@@ -1,4 +1,4 @@
-export const MCPORTER_MODES = ["lazy", "eager", "hoist"] as const;
+export const MCPORTER_MODES = ["lazy", "preload", "direct"] as const;
 
 export type McporterMode = (typeof MCPORTER_MODES)[number];
 
@@ -8,8 +8,14 @@ export function resolveMcporterMode(value: string | undefined): McporterMode {
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === "eager" || normalized === "hoist") {
+  if (normalized === "preload" || normalized === "direct") {
     return normalized;
+  }
+  if (normalized === "eager") {
+    return "preload";
+  }
+  if (normalized === "hoist") {
+    return "direct";
   }
 
   return "lazy";
@@ -26,7 +32,7 @@ export function shouldPreloadCatalog(
 }
 
 export function shouldHoistTools(mode: McporterMode): boolean {
-  return mode === "hoist";
+  return mode === "direct";
 }
 
 export function resolveServerMode(
