@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { Runtime, ServerToolInfo } from "mcporter";
+import { CatalogStore } from "../src/catalog-store.ts";
 import mcporterExtension, { __test__ } from "../src/index.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
+import { preloadCatalogForMode } from "../src/startup.ts";
 
 describe("mcporter renderer", () => {
   it("collapses describe output until expanded", () => {
@@ -320,6 +323,106 @@ describe("call args preview formatting", () => {
     ).toBe('query="this is a deliberately long strin...');
   });
 });
+
+describe("mode resolution", () => {
+  it("defaults to lazy", () => {
+    expect(__test__.resolveMcporterMode(undefined)).toBe("lazy");
+  });
+
+  it("accepts eager and hoist", () => {
+    expect(__test__.resolveMcporterMode("eager")).toBe("eager");
+    expect(__test__.resolveMcporterMode("HOIST")).toBe("hoist");
+  });
+
+  it("falls back to lazy for unknown values", () => {
+    expect(__test__.resolveMcporterMode("surprise")).toBe("lazy");
+  });
+});
+
+describe("startup preload", () => {
+  it("warms the basic catalog in eager mode", async () => {
+    const seenOptions: Array<{ includeSchema?: boolean }> = [];
+    const runtime = createRuntimeStub(async (server, options) => {
+      seenOptions.push({ includeSchema: options?.includeSchema });
+      if (server === "beta") {
+        throw new Error("offline");
+      }
+      return [demoTool(server, "list_items")];
+    }, ["alpha", "beta"]);
+
+    const summary = await preloadCatalogForMode(
+      runtime,
+      new CatalogStore(),
+      "eager",
+    );
+
+    expect(summary.warmedServers).toEqual(["alpha"]);
+    expect(summary.hoistedTools).toEqual([]);
+    expect(summary.warnings).toEqual(["beta: offline"]);
+    expect(seenOptions).toEqual([
+      { includeSchema: false },
+      { includeSchema: false },
+    ]);
+  });
+
+  it("loads schemas for hoist mode", async () => {
+    const seenOptions: Array<{ includeSchema?: boolean }> = [];
+    const runtime = createRuntimeStub(async (server, options) => {
+      seenOptions.push({ includeSchema: options?.includeSchema });
+      return [
+        demoTool(server, "list_items", {
+          type: "object",
+          properties: { limit: { type: "number" } },
+        }),
+      ];
+    }, ["alpha"]);
+
+    const summary = await preloadCatalogForMode(
+      runtime,
+      new CatalogStore(),
+      "hoist",
+    );
+
+    expect(summary.warmedServers).toEqual(["alpha"]);
+    expect(summary.hoistedTools.map((tool) => tool.selector)).toEqual([
+      "alpha.list_items",
+    ]);
+    expect(seenOptions).toEqual([{ includeSchema: true }]);
+  });
+});
+
+function demoTool(
+  server: string,
+  name: string,
+  inputSchema?: unknown,
+): ServerToolInfo {
+  return {
+    name,
+    description: `${server}.${name}`,
+    inputSchema,
+  };
+}
+
+function createRuntimeStub(
+  listTools: Runtime["listTools"],
+  servers: string[],
+): Runtime {
+  return {
+    listServers: () => [...servers],
+    listTools,
+    getDefinitions: () => [],
+    getDefinition: () => {
+      throw new Error("not implemented");
+    },
+    registerDefinition: () => {},
+    callTool: async () => ({}),
+    listResources: async () => ({}),
+    connect: async () => {
+      throw new Error("not implemented");
+    },
+    close: async () => {},
+  } as unknown as Runtime;
+}
 
 function createExtensionHarness(): {
   tool: {

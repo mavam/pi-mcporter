@@ -75,6 +75,10 @@ Tool name: `mcporter`
 
 - `--mcporter-config <path>`: explicit MCPorter config path (overrides `MCPORTER_CONFIG` env var and default locations)
 - `--mcporter-timeout-ms <ms>`: default call timeout in milliseconds (default `30000`)
+- `--mcporter-mode <lazy|eager|hoist>`: MCP tool visibility mode
+  - `lazy`: current behavior, only the stable `mcporter` proxy tool is visible and MCP metadata loads on demand
+  - `eager`: still only exposes `mcporter`, but preloads MCP tool metadata on startup so the agent can skip unnecessary discovery more often
+  - `hoist`: eagerly loads MCP metadata and registers MCP tools as first-class pi tools in addition to `mcporter`
 
 ## 🪄 Output behavior
 

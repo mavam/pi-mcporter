@@ -16,17 +16,26 @@ import { createRuntime, type Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
 import { handleSearchAction } from "./actions/search.js";
+import { formatCallArgsPreview } from "./call-args-preview.js";
 import { CatalogStore } from "./catalog-store.js";
 import { DEFAULT_CALL_TIMEOUT_MS } from "./constants.js";
 import { cleanSingleLine, textContent, toErrorMessage } from "./helpers.js";
+import { registerHoistedTools } from "./hoisted-tools.js";
 import {
   clampLimit,
   parseCallArgs,
   parseSelector,
   resolveCallTimeoutFromInputs,
 } from "./inputs.js";
+import {
+  resolveMcporterMode,
+  shouldHoistTools,
+  shouldPreloadCatalog,
+} from "./mode.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
+import { preloadCatalogForMode } from "./startup.js";
+import { withPromptMetadata } from "./tool-registration.js";
 import type { ToolDetails } from "./types.js";
 
 const PACKAGE_VERSION: string = await readFile(
@@ -39,7 +48,9 @@ const PACKAGE_VERSION: string = await readFile(
 export default function mcporterExtension(pi: ExtensionAPI) {
   let runtime: Runtime | undefined;
   let runtimePromise: Promise<Runtime> | undefined;
+  let preloadPromise: Promise<void> | undefined;
   const catalogStore = new CatalogStore();
+  const registeredHoistedSelectors = new Set<string>();
 
   pi.registerFlag("mcporter-config", {
     description:
@@ -53,9 +64,23 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     default: String(DEFAULT_CALL_TIMEOUT_MS),
   });
 
+  pi.registerFlag("mcporter-mode", {
+    description:
+      "MCP tool visibility mode: 'lazy' keeps only on-demand discovery, 'eager' preloads MCP catalogs through the mcporter proxy tool, and 'hoist' eagerly registers MCP tools as first-class pi tools.",
+    type: "string",
+    default: "lazy",
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     try {
-      await ensureRuntime();
+      const activeRuntime = await ensureRuntime();
+      preloadPromise = ensurePreload(activeRuntime, (message) => {
+        if (ctx.hasUI) {
+          ctx.ui.notify(message, "warning");
+        } else {
+          emitStderrNotice(message);
+        }
+      });
     } catch (error) {
       if (ctx.hasUI) {
         ctx.ui.notify(
@@ -68,118 +93,177 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     }
   });
 
+  pi.on("before_agent_start", async () => {
+    await preloadPromise;
+  });
+
   pi.on("session_shutdown", async () => {
     const activeRuntime = runtime;
     runtime = undefined;
     runtimePromise = undefined;
+    preloadPromise = undefined;
     catalogStore.clear();
+    registeredHoistedSelectors.clear();
 
     if (activeRuntime) {
       await activeRuntime.close().catch(() => {});
     }
   });
 
-  pi.registerTool({
-    name: "mcporter",
-    label: "MCPorter",
-    description:
-      `Discover and call MCP tools through MCPorter using one stable proxy tool. ` +
-      `Use action='search' to find tools, action='describe' for schema, action='call' to invoke. ` +
-      `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} and saved to a temp file when truncated.`,
-    parameters: McporterParameters,
+  pi.registerTool(
+    withPromptMetadata(
+      {
+        name: "mcporter",
+        label: "MCPorter",
+        description:
+          `Discover and call MCP tools through MCPorter using one stable proxy tool. ` +
+          `Use action='call' directly when you already know the selector, action='describe' when you need schema details, and action='search' only to find unknown tools. ` +
+          `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} and saved to a temp file when truncated.`,
+        parameters: McporterParameters,
 
-    async execute(_toolCallId, rawParams, signal, onUpdate, _ctx) {
-      const params = rawParams as McporterParams;
-      const activeRuntime = await ensureRuntime();
-      if (signal?.aborted) {
-        throw new Error("Cancelled.");
-      }
+        async execute(_toolCallId, rawParams, signal, onUpdate, _ctx) {
+          const params = rawParams as McporterParams;
+          const activeRuntime = await ensureRuntime();
+          if (signal?.aborted) {
+            throw new Error("Cancelled.");
+          }
 
-      switch (params.action) {
-        case "search": {
-          onUpdate?.({
-            content: textContent("Refreshing MCP catalog…"),
-            details: { action: "search" },
-          });
-          return await handleSearchAction(
-            activeRuntime,
-            params,
-            signal,
-            catalogStore,
-          );
-        }
-        case "describe": {
-          onUpdate?.({
-            content: textContent("Loading MCP tool metadata…"),
-            details: { action: "describe" },
-          });
-          return await handleDescribeAction(
-            activeRuntime,
-            params,
-            signal,
-            catalogStore,
-          );
-        }
-        case "call": {
-          onUpdate?.({
-            content: textContent("Calling MCP tool…"),
-            details: { action: "call", selector: params.selector },
-          });
-          return await handleCallAction(
-            activeRuntime,
-            params,
-            signal,
-            catalogStore,
-            resolveCallTimeout,
-          );
-        }
-        default:
-          throw new Error(
-            `Unknown action '${String(params.action)}'. Use one of: search, describe, call.`,
-          );
-      }
-    },
+          switch (params.action) {
+            case "search": {
+              onUpdate?.({
+                content: textContent("Refreshing MCP catalog…"),
+                details: { action: "search" },
+              });
+              return await handleSearchAction(
+                activeRuntime,
+                params,
+                signal,
+                catalogStore,
+              );
+            }
+            case "describe": {
+              onUpdate?.({
+                content: textContent("Loading MCP tool metadata…"),
+                details: { action: "describe" },
+              });
+              return await handleDescribeAction(
+                activeRuntime,
+                params,
+                signal,
+                catalogStore,
+              );
+            }
+            case "call": {
+              onUpdate?.({
+                content: textContent("Calling MCP tool…"),
+                details: { action: "call", selector: params.selector },
+              });
+              return await handleCallAction(
+                activeRuntime,
+                params,
+                signal,
+                catalogStore,
+                resolveCallTimeout,
+              );
+            }
+            default:
+              throw new Error(
+                `Unknown action '${String(params.action)}'. Use one of: search, describe, call.`,
+              );
+          }
+        },
 
-    renderCall(args, theme) {
-      return renderCallHeader(args as McporterParams, theme);
-    },
+        renderCall(args, theme) {
+          return renderCallHeader(args as McporterParams, theme);
+        },
 
-    renderResult(result, { expanded, isPartial }, theme) {
-      const details = result.details as ToolDetails | undefined;
-      const text = extractTextContent(result.content);
-      const isError = Boolean((result as { isError?: boolean }).isError);
+        renderResult(result, { expanded, isPartial }, theme) {
+          const details = result.details as ToolDetails | undefined;
+          const text = extractTextContent(result.content);
+          const isError = Boolean((result as { isError?: boolean }).isError);
 
-      if (isPartial) {
-        return renderSimpleText(text ?? "Working…", theme, "warning");
-      }
+          if (isPartial) {
+            return renderSimpleText(text ?? "Working…", theme, "warning");
+          }
 
-      if (isError) {
-        return renderBlockText(text ?? "mcporter failed", theme, "error");
-      }
+          if (isError) {
+            return renderBlockText(text ?? "mcporter failed", theme, "error");
+          }
 
-      if (!details) {
-        return renderBlockText(text ?? "", theme, "toolOutput");
-      }
+          if (!details) {
+            return renderBlockText(text ?? "", theme, "toolOutput");
+          }
 
-      if (details.action !== "call") {
-        if (expanded) {
-          return renderBlockText(text ?? "", theme, "toolOutput");
-        }
-        return renderCollapsedActionSummary(details, text, theme);
-      }
+          if (details.action !== "call") {
+            if (expanded) {
+              return renderBlockText(text ?? "", theme, "toolOutput");
+            }
+            return renderCollapsedActionSummary(details, text, theme);
+          }
 
-      if (expanded) {
-        return renderBlockText(text ?? "", theme, "toolOutput");
-      }
+          if (expanded) {
+            return renderBlockText(text ?? "", theme, "toolOutput");
+          }
 
-      const summary =
-        details.callOutputSummary ??
-        `${details.selector ?? "mcporter call"}: output available`;
-      let summaryText = theme.fg("success", summary);
-      summaryText += theme.fg("muted", ` (${getExpandHint()})`);
-      return new Text(summaryText, 0, 0);
-    },
-  });
+          const summary =
+            details.callOutputSummary ??
+            `${details.selector ?? "mcporter call"}: output available`;
+          let summaryText = theme.fg("success", summary);
+          summaryText += theme.fg("muted", ` (${getExpandHint()})`);
+          return new Text(summaryText, 0, 0);
+        },
+      },
+      {
+        promptGuidelines: [
+          "Prefer action='call' when the MCP selector is already known or obvious from context.",
+          "Use action='describe' to inspect arguments or schema details before calling an unfamiliar MCP tool.",
+          "Use action='search' only when the needed MCP tool is still unknown.",
+        ],
+      },
+    ),
+  );
+
+  function resolveMode() {
+    return resolveMcporterMode(pi.getFlag("mcporter-mode"));
+  }
+
+  function ensurePreload(
+    activeRuntime: Runtime,
+    notifyWarning: (message: string) => void,
+  ): Promise<void> | undefined {
+    const mode = resolveMode();
+    if (!shouldPreloadCatalog(mode)) {
+      return undefined;
+    }
+
+    if (!preloadPromise) {
+      preloadPromise = preloadCatalogForMode(activeRuntime, catalogStore, mode)
+        .then((summary) => {
+          if (shouldHoistTools(mode) && summary.hoistedTools.length > 0) {
+            registerHoistedTools(
+              pi,
+              activeRuntime,
+              catalogStore,
+              summary.hoistedTools,
+              resolveCallTimeout,
+              registeredHoistedSelectors,
+            );
+          }
+
+          if (summary.warnings.length > 0) {
+            notifyWarning(
+              `mcporter extension: metadata unavailable for ${summary.warnings.length} server(s).`,
+            );
+          }
+        })
+        .catch((error) => {
+          preloadPromise = undefined;
+          throw error;
+        });
+    }
+
+    return preloadPromise;
+  }
 
   function resolveConfiguredPath(): string | undefined {
     const explicit = pi.getFlag("mcporter-config");
@@ -356,128 +440,6 @@ function renderCallHeader(params: McporterParams, theme: Theme): Component {
   };
 }
 
-function isBarePreviewToken(value: string): boolean {
-  return /^[A-Za-z0-9._:/@-]+$/.test(value);
-}
-
-function truncateWithEllipsis(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return `${value.slice(0, maxChars)}...`;
-}
-
-function stringifyPreviewJson(value: unknown): string {
-  const seen = new WeakSet<object>();
-  try {
-    const json = JSON.stringify(value, (_key, currentValue) => {
-      if (typeof currentValue === "bigint") {
-        return null;
-      }
-      if (typeof currentValue === "number" && !Number.isFinite(currentValue)) {
-        return null;
-      }
-      if (
-        currentValue === undefined ||
-        typeof currentValue === "function" ||
-        typeof currentValue === "symbol"
-      ) {
-        return null;
-      }
-      if (typeof currentValue === "object" && currentValue !== null) {
-        if (seen.has(currentValue)) {
-          return "[Circular]";
-        }
-        seen.add(currentValue);
-      }
-      return currentValue;
-    });
-    return json ?? "null";
-  } catch {
-    return "null";
-  }
-}
-
-function formatPreviewString(value: string, maxChars: number): string {
-  if (value.length > 0 && isBarePreviewToken(value)) {
-    return truncateWithEllipsis(value, maxChars);
-  }
-  return formatJsonValuePreview(value, maxChars);
-}
-
-function formatPreviewKey(key: string, maxChars: number): string {
-  if (key.length > 0 && isBarePreviewToken(key)) {
-    return truncateWithEllipsis(key, maxChars);
-  }
-  return formatJsonValuePreview(key, maxChars);
-}
-
-function formatPreviewValue(value: unknown, maxChars: number): string {
-  if (value === null) {
-    return "null";
-  }
-
-  switch (typeof value) {
-    case "string":
-      return formatPreviewString(value, maxChars);
-    case "number":
-      return Number.isFinite(value) ? String(value) : "null";
-    case "boolean":
-      return value ? "true" : "false";
-    case "bigint":
-      return "null";
-    case "object":
-      return formatJsonValuePreview(value, maxChars);
-    default:
-      return "null";
-  }
-}
-
-function formatJsonValuePreview(value: unknown, maxChars: number): string {
-  return truncateWithEllipsis(stringifyPreviewJson(value), maxChars);
-}
-
-function formatArgsObjectKeyValuePreview(
-  value: Record<string, unknown>,
-  maxChars: number,
-): string | undefined {
-  const entries = Object.entries(value);
-  if (entries.length === 0) {
-    return undefined;
-  }
-
-  const preview = entries
-    .map(
-      ([key, entryValue]) =>
-        `${formatPreviewKey(key, maxChars)}=${formatPreviewValue(entryValue, maxChars)}`,
-    )
-    .join(" ");
-
-  return preview.length > 0
-    ? truncateWithEllipsis(preview, maxChars)
-    : undefined;
-}
-
-function formatCallArgsPreview(
-  params: McporterParams,
-  maxChars: number,
-): string | undefined {
-  if (maxChars <= 0) {
-    return undefined;
-  }
-
-  const argsResult = parseCallArgs(params);
-  if ("error" in argsResult || Object.keys(argsResult.args).length === 0) {
-    return undefined;
-  }
-
-  try {
-    return formatArgsObjectKeyValuePreview(argsResult.args, maxChars);
-  } catch {
-    return undefined;
-  }
-}
-
 export const __test__ = {
   clampLimit,
   formatCallArgsPreview,
@@ -486,6 +448,7 @@ export const __test__ = {
   parseSelector,
   rankTools,
   resolveCallTimeoutFromInputs,
+  resolveMcporterMode,
   scoreTool,
   suggest,
 };
