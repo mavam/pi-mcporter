@@ -134,6 +134,88 @@ describe("direct mode extension initialization", () => {
     }
   });
 
+  it("reactivates the original hoisted names after a session restart", async () => {
+    vi.resetModules();
+
+    const runtime = createRuntimeStub(
+      async (server) => [demoTool(server, "list_items")],
+      ["alpha"],
+    );
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+    const registeredTools: string[] = [];
+    let beforeAgentStart: (() => Promise<void>) | undefined;
+    let sessionShutdown: (() => Promise<void>) | undefined;
+    let activeTools = ["mcporter", "bash", "read", "edit"];
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(settingsPath, JSON.stringify({ mode: "direct" }), "utf8");
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      await mcporterExtension({
+        on(event: string, handler: unknown) {
+          if (event === "before_agent_start") {
+            beforeAgentStart = handler as () => Promise<void>;
+          }
+          if (event === "session_shutdown") {
+            sessionShutdown = handler as () => Promise<void>;
+          }
+        },
+        registerCommand() {},
+        getAllTools() {
+          return registeredTools.map((name) => ({ name, description: name }));
+        },
+        getActiveTools() {
+          return [...activeTools];
+        },
+        registerTool(definition: unknown) {
+          registeredTools.push((definition as { name: string }).name);
+        },
+        setActiveTools(toolNames: string[]) {
+          activeTools = [...toolNames];
+        },
+      } as never);
+
+      expect(
+        registeredTools.filter((name) => name === "mcp__alpha__list_items"),
+      ).toHaveLength(1);
+
+      await sessionShutdown?.();
+
+      expect(activeTools).not.toContain("mcp__alpha__list_items");
+
+      await beforeAgentStart?.();
+
+      expect(registeredTools).not.toContain("mcp__alpha__list_items__2");
+      expect(
+        registeredTools.filter((name) => name === "mcp__alpha__list_items"),
+      ).toHaveLength(1);
+      expect(activeTools).toContain("mcp__alpha__list_items");
+      expect(activeTools).toEqual(
+        expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("retries direct tool registration after a startup warning", async () => {
     vi.resetModules();
 

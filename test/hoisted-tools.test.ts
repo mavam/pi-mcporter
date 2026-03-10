@@ -102,6 +102,29 @@ describe("registerHoistedTools", () => {
       "mcp__linear__list_issues__2",
     ]);
   });
+
+  it("reuses existing hoisted names for selectors registered in a prior session", () => {
+    const definitions: Array<{ name: string }> = [];
+    const registeredSelectors = new Map([
+      ["alpha.lookup", "mcp__alpha__lookup"],
+    ]);
+    const registeredNames = new Set(["mcp__alpha__lookup"]);
+
+    const active = registerHoistedTools(
+      createPiStub(definitions, ["mcp__alpha__lookup"]),
+      async () => {
+        throw new Error("not implemented");
+      },
+      new CatalogStore(),
+      [demoTool("alpha", "lookup")],
+      () => 30_000,
+      registeredSelectors,
+      registeredNames,
+    );
+
+    expect(active).toEqual(["mcp__alpha__lookup"]);
+    expect(definitions).toEqual([]);
+  });
 });
 
 function demoTool(

@@ -17,6 +17,7 @@ export class CatalogStore {
 
   private basicServerCatalogCache = new Map<string, Cached<CatalogTool[]>>();
   private basicServerCatalogLoads = new Map<string, Promise<CatalogTool[]>>();
+  private basicServerCatalogWarnings = new Map<string, Cached<string>>();
 
   private schemaCatalogCache = new Map<string, Cached<CatalogTool[]>>();
   private schemaCatalogLoads = new Map<string, Promise<CatalogTool[]>>();
@@ -31,6 +32,7 @@ export class CatalogStore {
     this.basicCatalogLoad = undefined;
     this.basicServerCatalogCache.clear();
     this.basicServerCatalogLoads.clear();
+    this.basicServerCatalogWarnings.clear();
     this.schemaCatalogCache.clear();
     this.schemaCatalogLoads.clear();
   }
@@ -80,30 +82,37 @@ export class CatalogStore {
 
         await Promise.all(
           servers.map(async (server) => {
+            const cachedTools = this.getFreshCachedValue(
+              this.basicServerCatalogCache.get(server),
+            );
+            if (cachedTools) {
+              byServer.set(server, cachedTools);
+              tools.push(...cachedTools);
+              return;
+            }
+
+            const cachedWarning = this.getFreshCachedValue(
+              this.basicServerCatalogWarnings.get(server),
+            );
+            if (cachedWarning !== undefined) {
+              byServer.set(server, []);
+              warnings.push(`${server}: ${cachedWarning}`);
+              return;
+            }
+
             try {
-              const listed = await this.listToolsWithTimeout(
+              const mapped = await this.getServerCatalogBasicInternal(
                 activeRuntime,
                 server,
-                {
-                  includeSchema: false,
-                  autoAuthorize: false,
-                  allowCachedAuth: true,
-                },
               );
-              const mapped = listed
-                .map((tool) => toCatalogTool(server, tool))
-                .sort((a, b) => a.tool.localeCompare(b.tool));
-
               byServer.set(server, mapped);
               tools.push(...mapped);
-              this.basicServerCatalogCache.set(server, {
-                value: mapped,
-                expiresAt: fetchedAt + CATALOG_TTL_MS,
-              });
             } catch (error) {
               byServer.set(server, []);
-              warnings.push(`${server}: ${toErrorMessage(error)}`);
+              const warning = toErrorMessage(error);
+              warnings.push(`${server}: ${warning}`);
               this.basicServerCatalogCache.delete(server);
+              this.cacheBasicServerCatalogWarning(server, warning);
             }
           }),
         );
@@ -142,11 +151,16 @@ export class CatalogStore {
     activeRuntime: Runtime,
     server: string,
   ): Promise<CatalogTool[]> {
-    return await this.getServerCatalogBasicInternal(
-      activeRuntime,
-      server,
-      this.listTimeoutMs,
-    );
+    try {
+      return await this.getServerCatalogBasicInternal(
+        activeRuntime,
+        server,
+        this.listTimeoutMs,
+      );
+    } catch (error) {
+      this.cacheBasicServerCatalogWarning(server, toErrorMessage(error));
+      throw error;
+    }
   }
 
   private async getServerCatalogBasicInternal(
@@ -185,6 +199,7 @@ export class CatalogStore {
           value: mapped,
           expiresAt: fetchedAt + CATALOG_TTL_MS,
         });
+        this.basicServerCatalogWarnings.delete(server);
 
         return mapped;
       })
@@ -207,11 +222,16 @@ export class CatalogStore {
     activeRuntime: Runtime,
     server: string,
   ): Promise<CatalogTool[]> {
-    return await this.getServerCatalogWithSchemaInternal(
-      activeRuntime,
-      server,
-      this.listTimeoutMs,
-    );
+    try {
+      return await this.getServerCatalogWithSchemaInternal(
+        activeRuntime,
+        server,
+        this.listTimeoutMs,
+      );
+    } catch (error) {
+      this.cacheBasicServerCatalogWarning(server, toErrorMessage(error));
+      throw error;
+    }
   }
 
   private async getServerCatalogWithSchemaInternal(
@@ -254,6 +274,7 @@ export class CatalogStore {
           value: mapped,
           expiresAt: fetchedAt + CATALOG_TTL_MS,
         });
+        this.basicServerCatalogWarnings.delete(server);
 
         return mapped;
       })
@@ -277,6 +298,18 @@ export class CatalogStore {
       timeoutMs,
       `Timed out loading MCP tool catalog for '${server}' after ${timeoutMs}ms.`,
     );
+  }
+
+  private getFreshCachedValue<T>(cached: Cached<T> | undefined): T | undefined {
+    return cached && cached.expiresAt > Date.now() ? cached.value : undefined;
+  }
+
+  private cacheBasicServerCatalogWarning(server: string, warning: string): void {
+    const fetchedAt = Date.now();
+    this.basicServerCatalogWarnings.set(server, {
+      value: warning,
+      expiresAt: fetchedAt + CATALOG_TTL_MS,
+    });
   }
 }
 

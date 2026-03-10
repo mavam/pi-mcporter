@@ -208,8 +208,6 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
     settingsPromise = undefined;
     catalogStore.clear();
     syncHoistedToolActivation([]);
-    registeredHoistedNames.clear();
-    registeredHoistedSelectors.clear();
 
     if (activeRuntime) {
       await activeRuntime.close().catch(() => {});
@@ -240,7 +238,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
           preloadError = undefined;
 
           if (summary.hoistedTools.length > 0) {
-            const createdToolNames = registerHoistedTools(
+            const hoistedToolNames = registerHoistedTools(
               pi,
               ensureRuntime,
               catalogStore,
@@ -251,7 +249,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
             );
             syncHoistedToolActivation([
               ...activeHoistedToolNames,
-              ...createdToolNames,
+              ...hoistedToolNames,
             ]);
           }
 

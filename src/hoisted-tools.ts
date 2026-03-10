@@ -24,14 +24,18 @@ export function registerHoistedTools(
   registeredSelectors: Map<string, string>,
   registeredNames: Set<string>,
 ): string[] {
-  const created: string[] = [];
+  const activeToolNames: string[] = [];
   const occupiedNames = new Set([
     ...pi.getAllTools().map((tool) => tool.name),
     ...registeredNames,
   ]);
 
   for (const tool of tools) {
-    if (registeredSelectors.has(tool.selector)) {
+    const existingName = registeredSelectors.get(tool.selector);
+    if (existingName) {
+      occupiedNames.add(existingName);
+      registeredNames.add(existingName);
+      activeToolNames.push(existingName);
       continue;
     }
 
@@ -39,7 +43,7 @@ export function registerHoistedTools(
     occupiedNames.add(name);
     registeredNames.add(name);
     registeredSelectors.set(tool.selector, name);
-    created.push(name);
+    activeToolNames.push(name);
 
     pi.registerTool(
       withPromptMetadata(
@@ -109,7 +113,7 @@ export function registerHoistedTools(
     );
   }
 
-  return created;
+  return activeToolNames;
 }
 
 function sanitizeToolNamePart(value: string): string {
