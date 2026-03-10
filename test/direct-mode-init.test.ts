@@ -200,6 +200,79 @@ describe("direct mode extension initialization", () => {
       await rm(homeDirectory, { recursive: true, force: true });
     }
   });
+
+  it("does not block extension load when direct preload times out", async () => {
+    vi.resetModules();
+
+    const runtime = createRuntimeStub(
+      async () => await new Promise<ServerToolInfo[]>(() => {}),
+      ["alpha"],
+    );
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+    vi.doMock("../src/constants.ts", async () => {
+      const actual = await vi.importActual<
+        typeof import("../src/constants.ts")
+      >("../src/constants.ts");
+      return {
+        ...actual,
+        DEFAULT_CATALOG_LIST_TIMEOUT_MS: 25,
+      };
+    });
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+    const registeredTools: string[] = [];
+    let activeTools = ["mcporter", "bash", "read", "edit"];
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(settingsPath, JSON.stringify({ mode: "direct" }), "utf8");
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      const outcome = await Promise.race([
+        mcporterExtension({
+          on() {},
+          registerCommand() {},
+          getActiveTools() {
+            return [...activeTools];
+          },
+          registerTool(definition: unknown) {
+            registeredTools.push((definition as { name: string }).name);
+          },
+          setActiveTools(toolNames: string[]) {
+            activeTools = [...toolNames];
+          },
+        } as never).then(() => "resolved"),
+        new Promise<"timed_out">((resolve) => {
+          setTimeout(() => resolve("timed_out"), 250);
+        }),
+      ]);
+
+      expect(outcome).toBe("resolved");
+      expect(registeredTools).toEqual(["mcporter"]);
+      expect(activeTools).toEqual(
+        expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
+      );
+      expect(activeTools).not.toContain("mcp__alpha__list_items");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("../src/constants.ts");
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
 });
 
 function demoTool(

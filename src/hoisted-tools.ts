@@ -21,9 +21,9 @@ export function registerHoistedTools(
   catalogStore: CatalogStore,
   tools: CatalogTool[],
   resolveCallTimeout: (override?: number) => number,
-  registeredSelectors: Set<string>,
+  registeredSelectors: Map<string, string>,
+  registeredNames: Set<string>,
 ): string[] {
-  const registeredNames = new Set<string>();
   const created: string[] = [];
 
   for (const tool of tools) {
@@ -33,7 +33,7 @@ export function registerHoistedTools(
 
     const name = createUniqueHoistedToolName(tool, registeredNames);
     registeredNames.add(name);
-    registeredSelectors.add(tool.selector);
+    registeredSelectors.set(tool.selector, name);
     created.push(name);
 
     pi.registerTool(
@@ -149,13 +149,19 @@ function normalizeHoistedParameters(tool: CatalogTool): TSchema {
   if (isPlainObject(tool.inputSchema)) {
     const schema = { ...tool.inputSchema } as Record<string, unknown>;
     const hasProperties = isPlainObject(schema.properties);
+    const isComposedObjectSchema =
+      "$ref" in schema ||
+      Array.isArray(schema.allOf) ||
+      Array.isArray(schema.anyOf) ||
+      Array.isArray(schema.oneOf);
+
     if (schema.type === undefined && hasProperties) {
       schema.type = "object";
     }
     if (schema.type === "object" && schema.additionalProperties === undefined) {
       schema.additionalProperties = true;
     }
-    if (schema.type === "object") {
+    if (schema.type === "object" || isComposedObjectSchema) {
       return schema as TSchema;
     }
   }

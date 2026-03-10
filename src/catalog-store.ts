@@ -1,9 +1,17 @@
 import type { Runtime, ServerToolInfo } from "mcporter";
-import { CATALOG_TTL_MS } from "./constants.js";
+import {
+  CATALOG_TTL_MS,
+  DEFAULT_CATALOG_LIST_TIMEOUT_MS,
+} from "./constants.js";
 import { toErrorMessage } from "./helpers.js";
 import type { Cached, CatalogSnapshot, CatalogTool } from "./types.js";
 
+export interface CatalogStoreOptions {
+  listTimeoutMs?: number;
+}
+
 export class CatalogStore {
+  private readonly listTimeoutMs: number;
   private basicCatalogCache: Cached<CatalogSnapshot> | undefined;
   private basicCatalogLoad: Promise<CatalogSnapshot> | undefined;
 
@@ -12,6 +20,11 @@ export class CatalogStore {
 
   private schemaCatalogCache = new Map<string, Cached<CatalogTool[]>>();
   private schemaCatalogLoads = new Map<string, Promise<CatalogTool[]>>();
+
+  constructor(options: CatalogStoreOptions = {}) {
+    this.listTimeoutMs =
+      options.listTimeoutMs ?? DEFAULT_CATALOG_LIST_TIMEOUT_MS;
+  }
 
   clear(): void {
     this.basicCatalogCache = undefined;
@@ -68,11 +81,15 @@ export class CatalogStore {
         await Promise.all(
           servers.map(async (server) => {
             try {
-              const listed = await activeRuntime.listTools(server, {
-                includeSchema: false,
-                autoAuthorize: false,
-                allowCachedAuth: true,
-              });
+              const listed = await this.listToolsWithTimeout(
+                activeRuntime,
+                server,
+                {
+                  includeSchema: false,
+                  autoAuthorize: false,
+                  allowCachedAuth: true,
+                },
+              );
               const mapped = listed
                 .map((tool) => toCatalogTool(server, tool))
                 .sort((a, b) => a.tool.localeCompare(b.tool));
@@ -129,12 +146,11 @@ export class CatalogStore {
       return loading;
     }
 
-    const load = activeRuntime
-      .listTools(server, {
-        includeSchema: false,
-        autoAuthorize: false,
-        allowCachedAuth: true,
-      })
+    const load = this.listToolsWithTimeout(activeRuntime, server, {
+      includeSchema: false,
+      autoAuthorize: false,
+      allowCachedAuth: true,
+    })
       .then((listed) => {
         const fetchedAt = Date.now();
         const mapped = listed
@@ -171,12 +187,11 @@ export class CatalogStore {
       return loading;
     }
 
-    const load = activeRuntime
-      .listTools(server, {
-        includeSchema: true,
-        autoAuthorize: false,
-        allowCachedAuth: true,
-      })
+    const load = this.listToolsWithTimeout(activeRuntime, server, {
+      includeSchema: true,
+      autoAuthorize: false,
+      allowCachedAuth: true,
+    })
       .then((listed) => {
         const fetchedAt = Date.now();
         const mapped = listed
@@ -201,6 +216,47 @@ export class CatalogStore {
     this.schemaCatalogLoads.set(server, load);
     return load;
   }
+
+  private async listToolsWithTimeout(
+    activeRuntime: Runtime,
+    server: string,
+    options: Parameters<Runtime["listTools"]>[1],
+  ): Promise<ServerToolInfo[]> {
+    const timeoutMs = this.listTimeoutMs;
+    const request = activeRuntime.listTools(server, options);
+    return await raceWithTimeout(
+      request,
+      timeoutMs,
+      `Timed out loading MCP tool catalog for '${server}' after ${timeoutMs}ms.`,
+    );
+  }
+}
+
+function raceWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return promise;
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function toCatalogTool(server: string, tool: ServerToolInfo): CatalogTool {
