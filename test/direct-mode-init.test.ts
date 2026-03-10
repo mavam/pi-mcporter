@@ -367,6 +367,71 @@ describe("direct mode extension initialization", () => {
       await rm(homeDirectory, { recursive: true, force: true });
     }
   });
+
+  it("falls back to MCPORTER_CONFIG before settings configPath", async () => {
+    vi.resetModules();
+
+    const runtime = createRuntimeStub(async () => [], []);
+    const createRuntime = vi.fn().mockResolvedValue(runtime);
+    vi.doMock("mcporter", () => ({ createRuntime }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+    const previousConfig = process.env.MCPORTER_CONFIG;
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        mode: "preload",
+        configPath: "/settings/mcporter.json",
+      }),
+      "utf8",
+    );
+    process.env.HOME = homeDirectory;
+    process.env.MCPORTER_CONFIG = " /env/mcporter.json ";
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      await mcporterExtension({
+        on() {},
+        registerCommand() {},
+        getAllTools() {
+          return [];
+        },
+        getActiveTools() {
+          return ["mcporter"];
+        },
+        registerTool() {},
+        setActiveTools() {},
+      } as never);
+
+      expect(createRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          configPath: "/env/mcporter.json",
+        }),
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      if (previousConfig === undefined) {
+        delete process.env.MCPORTER_CONFIG;
+      } else {
+        process.env.MCPORTER_CONFIG = previousConfig;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
 });
 
 function demoTool(

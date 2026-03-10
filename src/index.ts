@@ -314,20 +314,30 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
     return await settingsPromise;
   }
 
+  function resolveConfiguredPath(
+    loadedSettings: McporterSettings,
+  ): string | undefined {
+    const env = process.env.MCPORTER_CONFIG;
+    if (typeof env === "string" && env.trim().length > 0) {
+      return env.trim();
+    }
+
+    return loadedSettings.configPath;
+  }
+
   async function ensureRuntime(): Promise<Runtime> {
     if (runtime) {
       return runtime;
     }
     if (!runtimePromise) {
       runtimePromise = ensureSettings()
-        .then((loadedSettings) =>
-          createRuntime({
-            ...(loadedSettings.configPath
-              ? { configPath: loadedSettings.configPath }
-              : {}),
+        .then((loadedSettings) => {
+          const configPath = resolveConfiguredPath(loadedSettings);
+          return createRuntime({
+            ...(configPath ? { configPath } : {}),
             clientInfo: { name: "pi-mcporter", version: PACKAGE_VERSION },
-          }),
-        )
+          });
+        })
         .then((created) => {
           runtime = created;
           return created;
