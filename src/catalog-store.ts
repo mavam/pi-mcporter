@@ -135,6 +135,25 @@ export class CatalogStore {
     activeRuntime: Runtime,
     server: string,
   ): Promise<CatalogTool[]> {
+    return await this.getServerCatalogBasicInternal(activeRuntime, server);
+  }
+
+  async preloadServerCatalogBasic(
+    activeRuntime: Runtime,
+    server: string,
+  ): Promise<CatalogTool[]> {
+    return await this.getServerCatalogBasicInternal(
+      activeRuntime,
+      server,
+      this.listTimeoutMs,
+    );
+  }
+
+  private async getServerCatalogBasicInternal(
+    activeRuntime: Runtime,
+    server: string,
+    timeoutMs?: number,
+  ): Promise<CatalogTool[]> {
     const now = Date.now();
     const cached = this.basicServerCatalogCache.get(server);
     if (cached && cached.expiresAt > now) {
@@ -146,11 +165,16 @@ export class CatalogStore {
       return loading;
     }
 
-    const load = this.listToolsWithTimeout(activeRuntime, server, {
-      includeSchema: false,
-      autoAuthorize: false,
-      allowCachedAuth: true,
-    })
+    const load = this.listToolsWithTimeout(
+      activeRuntime,
+      server,
+      {
+        includeSchema: false,
+        autoAuthorize: false,
+        allowCachedAuth: true,
+      },
+      timeoutMs,
+    )
       .then((listed) => {
         const fetchedAt = Date.now();
         const mapped = listed
@@ -176,6 +200,25 @@ export class CatalogStore {
     activeRuntime: Runtime,
     server: string,
   ): Promise<CatalogTool[]> {
+    return await this.getServerCatalogWithSchemaInternal(activeRuntime, server);
+  }
+
+  async preloadServerCatalogWithSchema(
+    activeRuntime: Runtime,
+    server: string,
+  ): Promise<CatalogTool[]> {
+    return await this.getServerCatalogWithSchemaInternal(
+      activeRuntime,
+      server,
+      this.listTimeoutMs,
+    );
+  }
+
+  private async getServerCatalogWithSchemaInternal(
+    activeRuntime: Runtime,
+    server: string,
+    timeoutMs?: number,
+  ): Promise<CatalogTool[]> {
     const now = Date.now();
     const cached = this.schemaCatalogCache.get(server);
     if (cached && cached.expiresAt > now) {
@@ -187,11 +230,16 @@ export class CatalogStore {
       return loading;
     }
 
-    const load = this.listToolsWithTimeout(activeRuntime, server, {
-      includeSchema: true,
-      autoAuthorize: false,
-      allowCachedAuth: true,
-    })
+    const load = this.listToolsWithTimeout(
+      activeRuntime,
+      server,
+      {
+        includeSchema: true,
+        autoAuthorize: false,
+        allowCachedAuth: true,
+      },
+      timeoutMs,
+    )
       .then((listed) => {
         const fetchedAt = Date.now();
         const mapped = listed
@@ -221,8 +269,8 @@ export class CatalogStore {
     activeRuntime: Runtime,
     server: string,
     options: Parameters<Runtime["listTools"]>[1],
+    timeoutMs?: number,
   ): Promise<ServerToolInfo[]> {
-    const timeoutMs = this.listTimeoutMs;
     const request = activeRuntime.listTools(server, options);
     return await raceWithTimeout(
       request,
@@ -234,17 +282,22 @@ export class CatalogStore {
 
 function raceWithTimeout<T>(
   promise: Promise<T>,
-  timeoutMs: number,
+  timeoutMs: number | undefined,
   message: string,
 ): Promise<T> {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+  if (
+    timeoutMs === undefined ||
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0
+  ) {
     return promise;
   }
 
+  const effectiveTimeoutMs = timeoutMs;
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(message));
-    }, timeoutMs);
+    }, effectiveTimeoutMs);
 
     promise.then(
       (value) => {

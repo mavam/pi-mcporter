@@ -33,11 +33,14 @@ export async function preloadCatalogForMode(
       try {
         const tools =
           serverMode === "direct"
-            ? await catalogStore.getServerCatalogWithSchema(
+            ? await catalogStore.preloadServerCatalogWithSchema(
                 activeRuntime,
                 server,
               )
-            : await catalogStore.getServerCatalogBasic(activeRuntime, server);
+            : await catalogStore.preloadServerCatalogBasic(
+                activeRuntime,
+                server,
+              );
         warmedServers.push(server);
         if (serverMode === "direct") {
           hoistedTools.push(...tools);

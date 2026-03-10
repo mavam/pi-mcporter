@@ -80,6 +80,28 @@ describe("registerHoistedTools", () => {
       },
     });
   });
+
+  it("suffixes hoisted names when Pi already exposes the generated name", () => {
+    const definitions: Array<{ name: string }> = [];
+    const existingToolNames = ["mcp__linear__list_issues"];
+
+    const created = registerHoistedTools(
+      createPiStub(definitions, existingToolNames),
+      async () => {
+        throw new Error("not implemented");
+      },
+      new CatalogStore(),
+      [demoTool("linear", "list_issues")],
+      () => 30_000,
+      new Map<string, string>(),
+      new Set<string>(),
+    );
+
+    expect(created).toEqual(["mcp__linear__list_issues__2"]);
+    expect(definitions.map((definition) => definition.name)).toEqual([
+      "mcp__linear__list_issues__2",
+    ]);
+  });
 });
 
 function demoTool(
@@ -98,8 +120,15 @@ function demoTool(
 
 function createPiStub(
   definitions: Array<{ name: string; parameters?: unknown }>,
+  existingToolNames: string[] = [],
 ) {
   return {
+    getAllTools() {
+      return [
+        ...existingToolNames,
+        ...definitions.map((definition) => definition.name),
+      ].map((name) => ({ name, description: name }));
+    },
     registerTool(definition: unknown) {
       const { name, parameters } = definition as {
         name: string;

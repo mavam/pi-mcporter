@@ -25,13 +25,18 @@ export function registerHoistedTools(
   registeredNames: Set<string>,
 ): string[] {
   const created: string[] = [];
+  const occupiedNames = new Set([
+    ...pi.getAllTools().map((tool) => tool.name),
+    ...registeredNames,
+  ]);
 
   for (const tool of tools) {
     if (registeredSelectors.has(tool.selector)) {
       continue;
     }
 
-    const name = createUniqueHoistedToolName(tool, registeredNames);
+    const name = createUniqueHoistedToolName(tool, occupiedNames);
+    occupiedNames.add(name);
     registeredNames.add(name);
     registeredSelectors.set(tool.selector, name);
     created.push(name);

@@ -33,6 +33,9 @@ describe("direct mode extension initialization", () => {
       await mcporterExtension({
         on() {},
         registerCommand() {},
+        getAllTools() {
+          return registeredTools.map((name) => ({ name, description: name }));
+        },
         getActiveTools() {
           return [...activeTools];
         },
@@ -95,6 +98,9 @@ describe("direct mode extension initialization", () => {
           }
         },
         registerCommand() {},
+        getAllTools() {
+          return activeTools.map((name) => ({ name, description: name }));
+        },
         getActiveTools() {
           return [...activeTools];
         },
@@ -168,6 +174,9 @@ describe("direct mode extension initialization", () => {
           }
         },
         registerCommand() {},
+        getAllTools() {
+          return registeredTools.map((name) => ({ name, description: name }));
+        },
         getActiveTools() {
           return [...activeTools];
         },
@@ -239,6 +248,9 @@ describe("direct mode extension initialization", () => {
         mcporterExtension({
           on() {},
           registerCommand() {},
+          getAllTools() {
+            return registeredTools.map((name) => ({ name, description: name }));
+          },
           getActiveTools() {
             return [...activeTools];
           },
