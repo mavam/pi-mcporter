@@ -49,55 +49,17 @@ const PACKAGE_VERSION: string = await readFile(
   .then((raw) => (JSON.parse(raw) as { version: string }).version)
   .catch(() => "0.0.0-dev");
 
-export default function mcporterExtension(pi: ExtensionAPI) {
+export default async function mcporterExtension(pi: ExtensionAPI) {
   let runtime: Runtime | undefined;
   let runtimePromise: Promise<Runtime> | undefined;
   let preloadPromise: Promise<void> | undefined;
+  let preloadWarnings: string[] = [];
+  let preloadError: string | undefined;
   let settings = getDefaultMcporterSettings();
   let settingsPromise: Promise<McporterSettings> | undefined;
   const catalogStore = new CatalogStore();
   const registeredHoistedSelectors = new Set<string>();
-
-  pi.on("session_start", async (_event, ctx) => {
-    try {
-      const activeRuntime = await ensureRuntime();
-      preloadPromise = ensurePreload(activeRuntime, (message) => {
-        if (ctx.hasUI) {
-          ctx.ui.notify(message, "warning");
-        } else {
-          emitStderrNotice(message);
-        }
-      });
-    } catch (error) {
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          `mcporter extension: ${toErrorMessage(error)}`,
-          "warning",
-        );
-      } else {
-        emitStderrNotice(`mcporter extension: ${toErrorMessage(error)}`);
-      }
-    }
-  });
-
-  pi.on("before_agent_start", async () => {
-    await preloadPromise;
-  });
-
-  pi.on("session_shutdown", async () => {
-    const activeRuntime = runtime;
-    runtime = undefined;
-    runtimePromise = undefined;
-    preloadPromise = undefined;
-    settings = getDefaultMcporterSettings();
-    settingsPromise = undefined;
-    catalogStore.clear();
-    registeredHoistedSelectors.clear();
-
-    if (activeRuntime) {
-      await activeRuntime.close().catch(() => {});
-    }
-  });
+  let activeHoistedToolNames = new Set<string>();
 
   pi.registerTool(
     withPromptMetadata(
@@ -212,16 +174,55 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     ),
   );
 
+  pi.on("session_start", async (_event, ctx) => {
+    try {
+      const activeRuntime = await ensureRuntime();
+      await ensurePreload(activeRuntime);
+    } catch (error) {
+      preloadError = toErrorMessage(error);
+    }
+
+    notifyStartupStatus((message) => {
+      if (ctx.hasUI) {
+        ctx.ui.notify(message, "warning");
+      } else {
+        emitStderrNotice(message);
+      }
+    });
+  });
+
+  pi.on("before_agent_start", async () => {
+    const activeRuntime = await ensureRuntime();
+    await ensurePreload(activeRuntime);
+  });
+
+  pi.on("session_shutdown", async () => {
+    const activeRuntime = runtime;
+    runtime = undefined;
+    runtimePromise = undefined;
+    preloadPromise = undefined;
+    preloadWarnings = [];
+    preloadError = undefined;
+    settings = getDefaultMcporterSettings();
+    settingsPromise = undefined;
+    catalogStore.clear();
+    syncHoistedToolActivation([]);
+    registeredHoistedSelectors.clear();
+
+    if (activeRuntime) {
+      await activeRuntime.close().catch(() => {});
+    }
+  });
+
   function resolveMode() {
     return settings.mode;
   }
 
-  function ensurePreload(
-    activeRuntime: Runtime,
-    notifyWarning: (message: string) => void,
-  ): Promise<void> | undefined {
+  function ensurePreload(activeRuntime: Runtime): Promise<void> | undefined {
     const mode = resolveMode();
     if (!shouldPreloadCatalog(mode, settings.serverModes)) {
+      preloadWarnings = [];
+      preloadError = undefined;
       return undefined;
     }
 
@@ -233,30 +234,65 @@ export default function mcporterExtension(pi: ExtensionAPI) {
         settings.serverModes,
       )
         .then((summary) => {
+          preloadWarnings = summary.warnings;
+          preloadError = undefined;
+
           if (summary.hoistedTools.length > 0) {
-            registerHoistedTools(
+            const createdToolNames = registerHoistedTools(
               pi,
-              activeRuntime,
+              ensureRuntime,
               catalogStore,
               summary.hoistedTools,
               resolveCallTimeout,
               registeredHoistedSelectors,
             );
+            syncHoistedToolActivation([
+              ...activeHoistedToolNames,
+              ...createdToolNames,
+            ]);
           }
 
           if (summary.warnings.length > 0) {
-            notifyWarning(
-              `mcporter extension: metadata unavailable for ${summary.warnings.length} server(s).`,
-            );
+            preloadPromise = undefined;
           }
         })
         .catch((error) => {
           preloadPromise = undefined;
+          preloadWarnings = [];
+          preloadError = toErrorMessage(error);
           throw error;
         });
     }
 
     return preloadPromise;
+  }
+
+  function syncHoistedToolActivation(nextToolNames: Iterable<string>): void {
+    const desiredToolNames = new Set(nextToolNames);
+    const activeToolNames = new Set(pi.getActiveTools());
+
+    for (const toolName of activeHoistedToolNames) {
+      if (!desiredToolNames.has(toolName)) {
+        activeToolNames.delete(toolName);
+      }
+    }
+    for (const toolName of desiredToolNames) {
+      activeToolNames.add(toolName);
+    }
+
+    activeHoistedToolNames = desiredToolNames;
+    pi.setActiveTools([...activeToolNames]);
+  }
+
+  function notifyStartupStatus(notify: (message: string) => void): void {
+    if (preloadError) {
+      notify(`mcporter extension: ${preloadError}`);
+    }
+    if (preloadWarnings.length > 0) {
+      notify(
+        `mcporter extension: metadata unavailable for ${preloadWarnings.length} server(s).`,
+      );
+    }
   }
 
   async function ensureSettings(): Promise<McporterSettings> {
@@ -305,6 +341,16 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 
   function resolveCallTimeout(override?: number): number {
     return resolveCallTimeoutFromInputs(override, String(settings.timeoutMs));
+  }
+
+  try {
+    await ensureSettings();
+    if (shouldPreloadCatalog(settings.mode, settings.serverModes)) {
+      const activeRuntime = await ensureRuntime();
+      await ensurePreload(activeRuntime);
+    }
+  } catch (error) {
+    preloadError = toErrorMessage(error);
   }
 }
 

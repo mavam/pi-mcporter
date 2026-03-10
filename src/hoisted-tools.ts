@@ -1,7 +1,4 @@
-import {
-  keyHint,
-  type Theme,
-} from "@mariozechner/pi-coding-agent";
+import { keyHint, type Theme } from "@mariozechner/pi-coding-agent";
 import {
   Text,
   truncateToWidth,
@@ -20,7 +17,7 @@ import type { CatalogTool, ToolDetails } from "./types.js";
 
 export function registerHoistedTools(
   pi: ExtensionAPI,
-  activeRuntime: Runtime,
+  ensureRuntime: () => Promise<Runtime>,
   catalogStore: CatalogStore,
   tools: CatalogTool[],
   resolveCallTimeout: (override?: number) => number,
@@ -47,6 +44,7 @@ export function registerHoistedTools(
           description: buildHoistedDescription(tool),
           parameters: normalizeHoistedParameters(tool),
           async execute(_toolCallId, rawParams, signal, _onUpdate, _ctx) {
+            const activeRuntime = await ensureRuntime();
             const args = isPlainObject(rawParams) ? rawParams : {};
             return await handleCallAction(
               activeRuntime,
@@ -89,7 +87,8 @@ export function registerHoistedTools(
             }
 
             const summary =
-              details?.callOutputSummary ?? `${tool.selector}: output available`;
+              details?.callOutputSummary ??
+              `${tool.selector}: output available`;
             let summaryText = theme.fg("success", summary);
             summaryText += theme.fg("muted", ` (${getExpandHint()})`);
             return new Text(summaryText, 0, 0);
