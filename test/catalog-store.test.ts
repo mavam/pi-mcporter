@@ -32,13 +32,40 @@ describe("CatalogStore preload timeouts", () => {
     ).rejects.toThrow("Timed out loading MCP tool catalog for 'alpha'");
   });
 
-  it("reuses preloaded server results and warnings for search snapshots", async () => {
+  it("falls back to basic discovery after schema preload failures", async () => {
+    const store = new CatalogStore({ listTimeoutMs: 10 });
+    const includeSchemaCalls: boolean[] = [];
+    const runtime = createRuntimeStub(async (_server, options) => {
+      includeSchemaCalls.push(Boolean(options?.includeSchema));
+      if (options?.includeSchema) {
+        throw new Error("schema load failed");
+      }
+      return [demoTool("alpha", "lookup")];
+    });
+
+    await expect(
+      store.preloadServerCatalogWithSchema(runtime, "alpha"),
+    ).rejects.toThrow("schema load failed");
+
+    const catalog = await store.getBasicCatalog(runtime);
+
+    expect(catalog.tools).toEqual([
+      expect.objectContaining({ selector: "alpha.lookup" }),
+    ]);
+    expect(catalog.byServer.get("alpha")).toEqual([
+      expect.objectContaining({ selector: "alpha.lookup" }),
+    ]);
+    expect(catalog.warnings).toEqual([]);
+    expect(includeSchemaCalls).toEqual([true, false]);
+  });
+
+  it("retries failed preload servers when building search snapshots", async () => {
     const store = new CatalogStore({ listTimeoutMs: 10 });
     const listCalls = new Map<string, number>();
     const runtime = createRuntimeStub(
       async (server) => {
         listCalls.set(server, (listCalls.get(server) ?? 0) + 1);
-        if (server === "beta") {
+        if (server === "beta" && listCalls.get(server) === 1) {
           await delay(30);
         }
         return [demoTool(server, "lookup")];
@@ -54,16 +81,19 @@ describe("CatalogStore preload timeouts", () => {
 
     const catalog = await store.getBasicCatalog(runtime);
 
-    expect(catalog.tools.map((tool) => tool.selector)).toEqual(["alpha.lookup"]);
+    expect(catalog.tools.map((tool) => tool.selector)).toEqual([
+      "alpha.lookup",
+      "beta.lookup",
+    ]);
     expect(catalog.byServer.get("alpha")).toEqual([
       expect.objectContaining({ selector: "alpha.lookup" }),
     ]);
-    expect(catalog.byServer.get("beta")).toEqual([]);
-    expect(catalog.warnings).toEqual([
-      expect.stringContaining("beta: Timed out loading MCP tool catalog"),
+    expect(catalog.byServer.get("beta")).toEqual([
+      expect.objectContaining({ selector: "beta.lookup" }),
     ]);
+    expect(catalog.warnings).toEqual([]);
     expect(listCalls.get("alpha")).toBe(1);
-    expect(listCalls.get("beta")).toBe(1);
+    expect(listCalls.get("beta")).toBe(2);
   });
 });
 

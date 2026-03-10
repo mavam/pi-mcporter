@@ -252,10 +252,6 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
               ...hoistedToolNames,
             ]);
           }
-
-          if (summary.warnings.length > 0) {
-            preloadPromise = undefined;
-          }
         })
         .catch((error) => {
           preloadPromise = undefined;

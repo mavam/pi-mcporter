@@ -216,29 +216,35 @@ describe("direct mode extension initialization", () => {
     }
   });
 
-  it("retries direct tool registration after a startup warning", async () => {
+  it("does not retry direct preload after a startup timeout", async () => {
     vi.resetModules();
 
+    let beforeAgentStart: (() => Promise<void>) | undefined;
     let attempts = 0;
     const runtime = createRuntimeStub(
-      async (server) => {
+      async () => {
         attempts += 1;
-        if (attempts === 1) {
-          throw new Error("auth missing");
-        }
-        return [demoTool(server, "list_items")];
+        return await new Promise<ServerToolInfo[]>(() => {});
       },
       ["alpha"],
     );
     vi.doMock("mcporter", () => ({
       createRuntime: vi.fn().mockResolvedValue(runtime),
     }));
+    vi.doMock("../src/constants.ts", async () => {
+      const actual = await vi.importActual<
+        typeof import("../src/constants.ts")
+      >("../src/constants.ts");
+      return {
+        ...actual,
+        DEFAULT_CATALOG_LIST_TIMEOUT_MS: 25,
+      };
+    });
 
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
     const settingsDirectory = join(homeDirectory, ".pi", "agent");
     const settingsPath = join(settingsDirectory, "mcporter.json");
     const previousHome = process.env.HOME;
-    let beforeAgentStart: (() => Promise<void>) | undefined;
     const registeredTools: string[] = [];
     let activeTools = ["mcporter", "bash", "read", "edit"];
 
@@ -271,11 +277,20 @@ describe("direct mode extension initialization", () => {
       } as never);
 
       expect(registeredTools).toEqual(["mcporter"]);
+      expect(attempts).toBe(1);
+      expect(beforeAgentStart).toBeTypeOf("function");
 
-      await beforeAgentStart?.();
+      const outcome = await Promise.race([
+        beforeAgentStart!().then(() => "resolved"),
+        new Promise<"timed_out">((resolve) => {
+          setTimeout(() => resolve("timed_out"), 250);
+        }),
+      ]);
 
-      expect(registeredTools).toContain("mcp__alpha__list_items");
-      expect(activeTools).toContain("mcp__alpha__list_items");
+      expect(outcome).toBe("resolved");
+      expect(attempts).toBe(1);
+      expect(registeredTools).toEqual(["mcporter"]);
+      expect(activeTools).not.toContain("mcp__alpha__list_items");
       expect(activeTools).toEqual(
         expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
       );
@@ -286,6 +301,7 @@ describe("direct mode extension initialization", () => {
         process.env.HOME = previousHome;
       }
 
+      vi.doUnmock("../src/constants.ts");
       vi.doUnmock("mcporter");
       vi.resetModules();
       await rm(homeDirectory, { recursive: true, force: true });
