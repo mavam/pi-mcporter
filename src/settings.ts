@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { DEFAULT_CALL_TIMEOUT_MS } from "./constants.js";
 import { isPlainObject, toErrorMessage } from "./helpers.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
-import { resolveMcporterMode, type McporterMode } from "./mode.js";
+import {
+  parseMcporterMode,
+  resolveMcporterMode,
+  type McporterMode,
+} from "./mode.js";
 
 export type McporterSettings = {
   configPath?: string;
@@ -99,7 +103,11 @@ function normalizeServerModes(value: unknown): Record<string, McporterMode> {
       if (!name || typeof modeValue !== "string") {
         return undefined;
       }
-      return [name, resolveMcporterMode(modeValue)] as const;
+      const mode = parseMcporterMode(modeValue);
+      if (!mode) {
+        return undefined;
+      }
+      return [name, mode] as const;
     })
     .filter(
       (entry): entry is readonly [string, McporterMode] => entry !== undefined,

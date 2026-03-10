@@ -40,7 +40,10 @@ describe("direct mode extension initialization", () => {
           return [...activeTools];
         },
         registerTool(definition: unknown) {
-          registeredTools.push((definition as { name: string }).name);
+          upsertRegisteredTool(
+            registeredTools,
+            (definition as { name: string }).name,
+          );
         },
         setActiveTools(toolNames: string[]) {
           activeTools = [...toolNames];
@@ -178,7 +181,10 @@ describe("direct mode extension initialization", () => {
           return [...activeTools];
         },
         registerTool(definition: unknown) {
-          registeredTools.push((definition as { name: string }).name);
+          upsertRegisteredTool(
+            registeredTools,
+            (definition as { name: string }).name,
+          );
         },
         setActiveTools(toolNames: string[]) {
           activeTools = [...toolNames];
@@ -269,7 +275,10 @@ describe("direct mode extension initialization", () => {
           return [...activeTools];
         },
         registerTool(definition: unknown) {
-          registeredTools.push((definition as { name: string }).name);
+          upsertRegisteredTool(
+            registeredTools,
+            (definition as { name: string }).name,
+          );
         },
         setActiveTools(toolNames: string[]) {
           activeTools = [...toolNames];
@@ -353,7 +362,10 @@ describe("direct mode extension initialization", () => {
             return [...activeTools];
           },
           registerTool(definition: unknown) {
-            registeredTools.push((definition as { name: string }).name);
+            upsertRegisteredTool(
+              registeredTools,
+              (definition as { name: string }).name,
+            );
           },
           setActiveTools(toolNames: string[]) {
             activeTools = [...toolNames];
@@ -481,4 +493,13 @@ function createRuntimeStub(
     },
     close: async () => {},
   } as unknown as Runtime;
+}
+
+function upsertRegisteredTool(registeredTools: string[], name: string): void {
+  const existingIndex = registeredTools.indexOf(name);
+  if (existingIndex >= 0) {
+    registeredTools[existingIndex] = name;
+    return;
+  }
+  registeredTools.push(name);
 }

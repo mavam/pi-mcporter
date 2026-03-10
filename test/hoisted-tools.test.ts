@@ -103,8 +103,10 @@ describe("registerHoistedTools", () => {
     ]);
   });
 
-  it("reuses existing hoisted names for selectors registered in a prior session", () => {
-    const definitions: Array<{ name: string }> = [];
+  it("refreshes existing hoisted names for selectors registered in a prior session", () => {
+    const definitions: Array<{ name: string; parameters?: unknown }> = [
+      { name: "mcp__alpha__lookup", parameters: { type: "string" } },
+    ];
     const registeredSelectors = new Map([
       ["alpha.lookup", "mcp__alpha__lookup"],
     ]);
@@ -123,7 +125,15 @@ describe("registerHoistedTools", () => {
     );
 
     expect(active).toEqual(["mcp__alpha__lookup"]);
-    expect(definitions).toEqual([]);
+    expect(definitions).toHaveLength(1);
+    expect(definitions[0]).toMatchObject({
+      name: "mcp__alpha__lookup",
+      parameters: {
+        type: "object",
+        additionalProperties: true,
+        description: "Arguments object for 'alpha.lookup'.",
+      },
+    });
   });
 });
 
@@ -157,6 +167,13 @@ function createPiStub(
         name: string;
         parameters?: unknown;
       };
+      const existingIndex = definitions.findIndex(
+        (definition) => definition.name === name,
+      );
+      if (existingIndex >= 0) {
+        definitions[existingIndex] = { name, parameters };
+        return;
+      }
       definitions.push({ name, parameters });
     },
   } as never;

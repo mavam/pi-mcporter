@@ -64,8 +64,27 @@ describe("mcporter settings", () => {
       configPath: undefined,
       timeoutMs: 30_000,
       mode: "lazy",
+      serverModes: {},
+    });
+  });
+
+  it("ignores invalid per-server modes while preserving valid overrides", () => {
+    expect(
+      normalizeMcporterSettings({
+        mode: "direct",
+        serverModes: {
+          linear: "preload",
+          slack: "surprise",
+          github: " lazy ",
+        },
+      }),
+    ).toEqual({
+      configPath: undefined,
+      timeoutMs: 30_000,
+      mode: "direct",
       serverModes: {
-        linear: "lazy",
+        linear: "preload",
+        github: "lazy",
       },
     });
   });

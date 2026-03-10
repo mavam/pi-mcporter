@@ -1,4 +1,8 @@
-import { keyHint, type Theme } from "@mariozechner/pi-coding-agent";
+import {
+  keyHint,
+  type Theme,
+  type ToolDefinition,
+} from "@mariozechner/pi-coding-agent";
 import {
   Text,
   truncateToWidth,
@@ -31,89 +35,98 @@ export function registerHoistedTools(
   ]);
 
   for (const tool of tools) {
-    const existingName = registeredSelectors.get(tool.selector);
-    if (existingName) {
-      occupiedNames.add(existingName);
-      registeredNames.add(existingName);
-      activeToolNames.push(existingName);
-      continue;
-    }
-
-    const name = createUniqueHoistedToolName(tool, occupiedNames);
+    const name =
+      registeredSelectors.get(tool.selector) ??
+      createUniqueHoistedToolName(tool, occupiedNames);
     occupiedNames.add(name);
     registeredNames.add(name);
     registeredSelectors.set(tool.selector, name);
     activeToolNames.push(name);
 
     pi.registerTool(
-      withPromptMetadata(
-        {
-          name,
-          label: tool.selector,
-          description: buildHoistedDescription(tool),
-          parameters: normalizeHoistedParameters(tool),
-          async execute(_toolCallId, rawParams, signal, _onUpdate, _ctx) {
-            const activeRuntime = await ensureRuntime();
-            const args = isPlainObject(rawParams) ? rawParams : {};
-            return await handleCallAction(
-              activeRuntime,
-              {
-                action: "call",
-                selector: tool.selector,
-                args,
-              },
-              signal,
-              catalogStore,
-              resolveCallTimeout,
-            );
-          },
-          renderCall(args, theme) {
-            return renderHoistedCallHeader(
-              tool.selector,
-              isPlainObject(args) ? args : {},
-              theme,
-            );
-          },
-          renderResult(result, { expanded, isPartial }, theme) {
-            const details = result.details as ToolDetails | undefined;
-            const text = extractTextContent(result.content);
-            const isError = Boolean((result as { isError?: boolean }).isError);
-
-            if (isPartial) {
-              return renderSimpleText(text ?? "Working…", theme, "warning");
-            }
-
-            if (isError) {
-              return renderBlockText(
-                text ?? `${tool.selector} failed`,
-                theme,
-                "error",
-              );
-            }
-
-            if (expanded) {
-              return renderBlockText(text ?? "", theme, "toolOutput");
-            }
-
-            const summary =
-              details?.callOutputSummary ??
-              `${tool.selector}: output available`;
-            let summaryText = theme.fg("success", summary);
-            summaryText += theme.fg("muted", ` (${getExpandHint()})`);
-            return new Text(summaryText, 0, 0);
-          },
-        },
-        {
-          promptSnippet: buildHoistedPromptSnippet(tool),
-          promptGuidelines: [
-            `Call '${tool.selector}' directly when it clearly matches the user's request.`,
-          ],
-        },
+      createHoistedToolDefinition(
+        name,
+        tool,
+        ensureRuntime,
+        catalogStore,
+        resolveCallTimeout,
       ),
     );
   }
 
   return activeToolNames;
+}
+
+function createHoistedToolDefinition(
+  name: string,
+  tool: CatalogTool,
+  ensureRuntime: () => Promise<Runtime>,
+  catalogStore: CatalogStore,
+  resolveCallTimeout: (override?: number) => number,
+): ToolDefinition<TSchema, ToolDetails> {
+  return withPromptMetadata(
+    {
+      name,
+      label: tool.selector,
+      description: buildHoistedDescription(tool),
+      parameters: normalizeHoistedParameters(tool),
+      async execute(_toolCallId, rawParams, signal, _onUpdate, _ctx) {
+        const activeRuntime = await ensureRuntime();
+        const args = isPlainObject(rawParams) ? rawParams : {};
+        return await handleCallAction(
+          activeRuntime,
+          {
+            action: "call",
+            selector: tool.selector,
+            args,
+          },
+          signal,
+          catalogStore,
+          resolveCallTimeout,
+        );
+      },
+      renderCall(args, theme) {
+        return renderHoistedCallHeader(
+          tool.selector,
+          isPlainObject(args) ? args : {},
+          theme,
+        );
+      },
+      renderResult(result, { expanded, isPartial }, theme) {
+        const details = result.details as ToolDetails | undefined;
+        const text = extractTextContent(result.content);
+        const isError = Boolean((result as { isError?: boolean }).isError);
+
+        if (isPartial) {
+          return renderSimpleText(text ?? "Working…", theme, "warning");
+        }
+
+        if (isError) {
+          return renderBlockText(
+            text ?? `${tool.selector} failed`,
+            theme,
+            "error",
+          );
+        }
+
+        if (expanded) {
+          return renderBlockText(text ?? "", theme, "toolOutput");
+        }
+
+        const summary =
+          details?.callOutputSummary ?? `${tool.selector}: output available`;
+        let summaryText = theme.fg("success", summary);
+        summaryText += theme.fg("muted", ` (${getExpandHint()})`);
+        return new Text(summaryText, 0, 0);
+      },
+    },
+    {
+      promptSnippet: buildHoistedPromptSnippet(tool),
+      promptGuidelines: [
+        `Call '${tool.selector}' directly when it clearly matches the user's request.`,
+      ],
+    },
+  );
 }
 
 function sanitizeToolNamePart(value: string): string {
