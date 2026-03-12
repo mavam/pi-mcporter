@@ -24,6 +24,12 @@ type CreateMcporterControllerOptions = {
   packageVersion: string;
 };
 
+class StaleInitializationError extends Error {
+  constructor() {
+    super("Stale initialization result.");
+  }
+}
+
 export function createMcporterController(
   pi: ExtensionAPI,
   options: CreateMcporterControllerOptions,
@@ -43,6 +49,13 @@ export function createMcporterController(
   let preloadPromise: Promise<PreloadSummary | undefined> | undefined;
   let startupStatus: StartupStatus = { warnings: [] };
   let warmupPromise: Promise<StartupStatus> | undefined;
+  let lifecycleGeneration = 0;
+
+  function throwIfStale(generation: number): void {
+    if (generation !== lifecycleGeneration) {
+      throw new StaleInitializationError();
+    }
+  }
 
   async function ensureResolvedConfig(): Promise<ResolvedMcporterConfig> {
     if (resolvedConfig) {
@@ -50,15 +63,21 @@ export function createMcporterController(
     }
 
     if (!resolvedConfigPromise) {
-      resolvedConfigPromise = loadResolvedMcporterConfig()
+      const generation = lifecycleGeneration;
+      let promise: Promise<ResolvedMcporterConfig>;
+      promise = loadResolvedMcporterConfig()
         .then((loaded) => {
+          throwIfStale(generation);
           resolvedConfig = loaded;
           return loaded;
         })
         .catch((error) => {
-          resolvedConfigPromise = undefined;
+          if (resolvedConfigPromise === promise) {
+            resolvedConfigPromise = undefined;
+          }
           throw error;
         });
+      resolvedConfigPromise = promise;
     }
 
     return await resolvedConfigPromise;
@@ -70,9 +89,12 @@ export function createMcporterController(
     }
 
     if (!runtimePromise) {
-      runtimePromise = ensureResolvedConfig()
-        .then((config) =>
-          createRuntimeFn({
+      const generation = lifecycleGeneration;
+      let promise: Promise<Runtime>;
+      promise = ensureResolvedConfig()
+        .then((config) => {
+          throwIfStale(generation);
+          return createRuntimeFn({
             ...(config.runtimeConfigPath
               ? { configPath: config.runtimeConfigPath }
               : {}),
@@ -80,16 +102,23 @@ export function createMcporterController(
               name: "pi-mcporter",
               version: options.packageVersion,
             },
-          }),
-        )
-        .then((created) => {
+          });
+        })
+        .then(async (created) => {
+          if (generation !== lifecycleGeneration) {
+            await created.close().catch(() => {});
+            throw new StaleInitializationError();
+          }
           runtime = created;
           return created;
         })
         .catch((error) => {
-          runtimePromise = undefined;
+          if (runtimePromise === promise) {
+            runtimePromise = undefined;
+          }
           throw error;
         });
+      runtimePromise = promise;
     }
 
     return await runtimePromise;
@@ -98,28 +127,37 @@ export function createMcporterController(
   async function ensurePreload(
     activeRuntime: Runtime,
   ): Promise<PreloadSummary | undefined> {
+    const generation = lifecycleGeneration;
     const config = await ensureResolvedConfig();
+    throwIfStale(generation);
     if (!shouldPreloadCatalog(config.mode, config.serverModes)) {
       pendingHoistedTools = [];
       return undefined;
     }
 
     if (!preloadPromise) {
-      preloadPromise = preloadCatalogForMode(
+      let promise: Promise<PreloadSummary | undefined>;
+      promise = preloadCatalogForMode(
         activeRuntime,
         catalogStore,
         config.mode,
         config.serverModes,
       )
         .then((summary) => {
+          throwIfStale(generation);
           pendingHoistedTools = summary.hoistedTools;
           return summary;
         })
         .catch((error) => {
-          preloadPromise = undefined;
-          pendingHoistedTools = [];
+          if (preloadPromise === promise) {
+            preloadPromise = undefined;
+          }
+          if (!(error instanceof StaleInitializationError)) {
+            pendingHoistedTools = [];
+          }
           throw error;
         });
+      preloadPromise = promise;
     }
 
     return await preloadPromise;
@@ -208,16 +246,22 @@ export function createMcporterController(
       return await warmupPromise;
     }
 
-    warmupPromise = (async () => {
+    const generation = lifecycleGeneration;
+    let promise: Promise<StartupStatus>;
+    promise = (async () => {
       startupStatus = { warnings: [] };
 
       try {
         const activeRuntime = await ensureRuntime();
         const preloadSummary = await ensurePreload(activeRuntime);
+        throwIfStale(generation);
         startupStatus = {
           warnings: preloadSummary?.warnings ?? [],
         };
       } catch (error) {
+        if (error instanceof StaleInitializationError) {
+          return startupStatus;
+        }
         pendingHoistedTools = [];
         startupStatus = {
           error: toErrorMessage(error),
@@ -225,11 +269,15 @@ export function createMcporterController(
         };
       }
 
+      throwIfStale(generation);
       syncHoistedToolActivation(registerPendingHoistedTools());
       return startupStatus;
     })().finally(() => {
-      warmupPromise = undefined;
+      if (warmupPromise === promise) {
+        warmupPromise = undefined;
+      }
     });
+    warmupPromise = promise;
 
     return await warmupPromise;
   }
@@ -266,12 +314,14 @@ export function createMcporterController(
   }
 
   async function shutdown(): Promise<void> {
+    lifecycleGeneration += 1;
     const activeRuntime = runtime;
     runtime = undefined;
     runtimePromise = undefined;
     resolvedConfig = undefined;
     resolvedConfigPromise = undefined;
     preloadPromise = undefined;
+    warmupPromise = undefined;
     pendingHoistedTools = [];
     startupStatus = { warnings: [] };
     catalogStore.clear();

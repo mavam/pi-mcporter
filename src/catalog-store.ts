@@ -21,7 +21,10 @@ export class CatalogStore {
   private basicCatalogLoad: Promise<CatalogSnapshot> | undefined;
 
   private basicServerCatalogCache = new Map<string, Cached<CatalogTool[]>>();
-  private basicServerCatalogLoads = new Map<string, CatalogLoad<CatalogTool[]>>();
+  private basicServerCatalogLoads = new Map<
+    string,
+    CatalogLoad<CatalogTool[]>
+  >();
 
   private schemaCatalogCache = new Map<string, Cached<CatalogTool[]>>();
   private schemaCatalogLoads = new Map<string, CatalogLoad<CatalogTool[]>>();
@@ -77,20 +80,24 @@ export class CatalogStore {
 
     if (!this.basicCatalogLoad) {
       this.basicCatalogLoad = (async () => {
-        const fetchedAt = Date.now();
+        const loadStartedAt = Date.now();
         const servers = activeRuntime.listServers();
         const byServer = new Map<string, CatalogTool[]>();
         const tools: CatalogTool[] = [];
         const warnings: string[] = [];
+        const sourceFetchedAts: number[] = [];
+        const sourceExpiresAts: number[] = [];
 
         await Promise.all(
           servers.map(async (server) => {
-            const cachedTools = this.getFreshCachedValue(
+            const cachedTools = this.getFreshCachedEntry(
               this.basicServerCatalogCache.get(server),
             );
             if (cachedTools) {
-              byServer.set(server, cachedTools);
-              tools.push(...cachedTools);
+              byServer.set(server, cachedTools.value);
+              tools.push(...cachedTools.value);
+              sourceFetchedAts.push(cachedTools.fetchedAt);
+              sourceExpiresAts.push(cachedTools.expiresAt);
               return;
             }
 
@@ -101,6 +108,13 @@ export class CatalogStore {
               );
               byServer.set(server, mapped);
               tools.push(...mapped);
+              const refreshed = this.getFreshCachedEntry(
+                this.basicServerCatalogCache.get(server),
+              );
+              if (refreshed) {
+                sourceFetchedAts.push(refreshed.fetchedAt);
+                sourceExpiresAts.push(refreshed.expiresAt);
+              }
             } catch (error) {
               byServer.set(server, []);
               const warning = toErrorMessage(error);
@@ -111,6 +125,14 @@ export class CatalogStore {
         );
 
         tools.sort((a, b) => a.selector.localeCompare(b.selector));
+        const fetchedAt =
+          sourceFetchedAts.length > 0
+            ? Math.min(...sourceFetchedAts)
+            : loadStartedAt;
+        const expiresAt =
+          sourceExpiresAts.length > 0
+            ? Math.min(...sourceExpiresAts)
+            : fetchedAt + CATALOG_TTL_MS;
         const snapshot: CatalogSnapshot = {
           fetchedAt,
           servers,
@@ -120,8 +142,9 @@ export class CatalogStore {
         };
 
         this.basicCatalogCache = {
+          fetchedAt,
           value: snapshot,
-          expiresAt: fetchedAt + CATALOG_TTL_MS,
+          expiresAt,
         };
 
         return snapshot;
@@ -183,10 +206,10 @@ export class CatalogStore {
           .map((tool) => toCatalogTool(server, tool))
           .sort((a, b) => a.tool.localeCompare(b.tool));
 
-        this.basicServerCatalogCache.set(server, {
-          value: mapped,
-          expiresAt: fetchedAt + CATALOG_TTL_MS,
-        });
+        this.basicServerCatalogCache.set(
+          server,
+          createCachedValue(mapped, fetchedAt),
+        );
 
         return mapped;
       })
@@ -251,14 +274,14 @@ export class CatalogStore {
           .map((tool) => toCatalogTool(server, tool))
           .sort((a, b) => a.tool.localeCompare(b.tool));
 
-        this.schemaCatalogCache.set(server, {
-          value: mapped,
-          expiresAt: fetchedAt + CATALOG_TTL_MS,
-        });
-        this.basicServerCatalogCache.set(server, {
-          value: mapped,
-          expiresAt: fetchedAt + CATALOG_TTL_MS,
-        });
+        this.schemaCatalogCache.set(
+          server,
+          createCachedValue(mapped, fetchedAt),
+        );
+        this.basicServerCatalogCache.set(
+          server,
+          createCachedValue(mapped, fetchedAt),
+        );
 
         return mapped;
       })
@@ -287,8 +310,10 @@ export class CatalogStore {
     );
   }
 
-  private getFreshCachedValue<T>(cached: Cached<T> | undefined): T | undefined {
-    return cached && cached.expiresAt > Date.now() ? cached.value : undefined;
+  private getFreshCachedEntry<T>(
+    cached: Cached<T> | undefined,
+  ): Cached<T> | undefined {
+    return cached && cached.expiresAt > Date.now() ? cached : undefined;
   }
 }
 
@@ -329,6 +354,14 @@ function hasMatchingTimeoutProfile(
   requestedTimeoutMs: number | undefined,
 ): boolean {
   return currentTimeoutMs === requestedTimeoutMs;
+}
+
+function createCachedValue<T>(value: T, fetchedAt = Date.now()): Cached<T> {
+  return {
+    fetchedAt,
+    expiresAt: fetchedAt + CATALOG_TTL_MS,
+    value,
+  };
 }
 
 function toCatalogTool(server: string, tool: ServerToolInfo): CatalogTool {

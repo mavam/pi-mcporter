@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
 import { CatalogStore } from "../src/catalog-store.ts";
+import { CATALOG_TTL_MS } from "../src/constants.ts";
 import { preloadCatalogForMode } from "../src/startup.ts";
 
 describe("CatalogStore preload timeouts", () => {
@@ -76,15 +77,17 @@ describe("CatalogStore preload timeouts", () => {
       return [demoTool("alpha", "lookup")];
     });
 
-    const preloadResult = store.preloadServerCatalogBasic(runtime, "alpha").then(
-      () => ({ ok: true as const }),
-      (error) => ({ ok: false as const, error }),
-    );
+    const preloadResult = store
+      .preloadServerCatalogBasic(runtime, "alpha")
+      .then(
+        () => ({ ok: true as const }),
+        (error) => ({ ok: false as const, error }),
+      );
     await delay(5);
 
-    await expect(store.getServerCatalogBasic(runtime, "alpha")).resolves.toEqual(
-      [expect.objectContaining({ selector: "alpha.lookup" })],
-    );
+    await expect(
+      store.getServerCatalogBasic(runtime, "alpha"),
+    ).resolves.toEqual([expect.objectContaining({ selector: "alpha.lookup" })]);
     await expect(preloadResult).resolves.toMatchObject({
       ok: false,
       error: expect.objectContaining({
@@ -158,6 +161,53 @@ describe("CatalogStore preload timeouts", () => {
     expect(catalog.warnings).toEqual([]);
     expect(listCalls.get("alpha")).toBe(1);
     expect(listCalls.get("beta")).toBe(2);
+  });
+
+  it("expires aggregate snapshots when a reused per-server cache entry expires", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const store = new CatalogStore();
+      const alphaResults = ["legacy_lookup", "fresh_lookup"];
+      const listCalls = new Map<string, number>();
+      const runtime = createRuntimeStub(
+        async (server) => {
+          listCalls.set(server, (listCalls.get(server) ?? 0) + 1);
+          if (server === "alpha") {
+            return [
+              demoTool(
+                server,
+                alphaResults[(listCalls.get(server) ?? 1) - 1] ??
+                  "fresh_lookup",
+              ),
+            ];
+          }
+          return [demoTool(server, "lookup")];
+        },
+        ["alpha", "beta"],
+      );
+
+      await store.getServerCatalogBasic(runtime, "alpha");
+      vi.advanceTimersByTime(CATALOG_TTL_MS - 1);
+
+      const firstSnapshot = await store.getBasicCatalog(runtime);
+      expect(firstSnapshot.byServer.get("alpha")).toEqual([
+        expect.objectContaining({ selector: "alpha.legacy_lookup" }),
+      ]);
+      expect(listCalls.get("alpha")).toBe(1);
+      expect(listCalls.get("beta")).toBe(1);
+
+      vi.advanceTimersByTime(2);
+
+      const secondSnapshot = await store.getBasicCatalog(runtime);
+      expect(secondSnapshot.byServer.get("alpha")).toEqual([
+        expect.objectContaining({ selector: "alpha.fresh_lookup" }),
+      ]);
+      expect(listCalls.get("alpha")).toBe(2);
+      expect(listCalls.get("beta")).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

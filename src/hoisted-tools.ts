@@ -15,13 +15,13 @@ import type { Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import type { CatalogStore } from "./catalog-store.js";
 import { formatArgsObjectKeyValuePreview } from "./call-args-preview.js";
-import {
-  DEFAULT_CALL_TIMEOUT_MS,
-  MAX_CALL_TIMEOUT_MS,
-} from "./constants.js";
+import { DEFAULT_CALL_TIMEOUT_MS, MAX_CALL_TIMEOUT_MS } from "./constants.js";
 import { isPlainObject } from "./helpers.js";
 import { withPromptMetadata } from "./tool-registration.js";
 import type { CatalogTool, ToolDetails } from "./types.js";
+
+const DEFAULT_HOISTED_TIMEOUT_FIELD = "timeoutMs";
+const SYNTHETIC_HOISTED_TIMEOUT_FIELD = "__mcporterTimeoutMs";
 
 export function registerHoistedTools(
   pi: ExtensionAPI,
@@ -66,16 +66,23 @@ function createHoistedToolDefinition(
   catalogStore: CatalogStore,
   resolveCallTimeout: (override?: number) => number,
 ): ToolDefinition<TSchema, ToolDetails> {
+  const timeoutField = getHoistedTimeoutField(tool);
   return withPromptMetadata(
     {
       name,
       label: tool.selector,
       description: buildHoistedDescription(tool),
-      parameters: normalizeHoistedParameters(tool),
+      parameters: normalizeHoistedParameters(tool, timeoutField),
       async execute(_toolCallId, rawParams, signal, _onUpdate, _ctx) {
         const activeRuntime = await ensureRuntime();
         const rawArgs = isPlainObject(rawParams) ? rawParams : {};
-        const { timeoutMs, ...args } = rawArgs;
+        const timeoutMs = rawArgs[timeoutField];
+        const args =
+          timeoutField in rawArgs
+            ? Object.fromEntries(
+                Object.entries(rawArgs).filter(([key]) => key !== timeoutField),
+              )
+            : rawArgs;
         return await handleCallAction(
           activeRuntime,
           {
@@ -171,7 +178,10 @@ function buildHoistedPromptSnippet(tool: CatalogTool): string {
   return description ? `${tool.selector} — ${description}` : tool.selector;
 }
 
-function normalizeHoistedParameters(tool: CatalogTool): TSchema {
+function normalizeHoistedParameters(
+  tool: CatalogTool,
+  timeoutField: string,
+): TSchema {
   const timeoutProperty = Type.Optional(
     Type.Integer({
       minimum: 1,
@@ -181,7 +191,7 @@ function normalizeHoistedParameters(tool: CatalogTool): TSchema {
   );
   const timeoutSchema = Type.Object(
     {
-      timeoutMs: timeoutProperty,
+      [timeoutField]: timeoutProperty,
     },
     {
       additionalProperties: true,
@@ -208,7 +218,7 @@ function normalizeHoistedParameters(tool: CatalogTool): TSchema {
       const properties = hasProperties
         ? { ...(schema.properties as Record<string, unknown>) }
         : {};
-      properties.timeoutMs ??= timeoutProperty;
+      properties[timeoutField] ??= timeoutProperty;
       schema.properties = properties;
       return schema as TSchema;
     }
@@ -225,13 +235,36 @@ function normalizeHoistedParameters(tool: CatalogTool): TSchema {
 
   return Type.Object(
     {
-      timeoutMs: timeoutProperty,
+      [timeoutField]: timeoutProperty,
     },
     {
       additionalProperties: true,
       description: `Arguments object for '${tool.selector}'.`,
     },
   );
+}
+
+function getHoistedTimeoutField(tool: CatalogTool): string {
+  if (!isPlainObject(tool.inputSchema)) {
+    return DEFAULT_HOISTED_TIMEOUT_FIELD;
+  }
+
+  const schema = tool.inputSchema as Record<string, unknown>;
+  const hasProperties = isPlainObject(schema.properties);
+  const properties = hasProperties
+    ? (schema.properties as Record<string, unknown>)
+    : undefined;
+  const isComposedObjectSchema =
+    "$ref" in schema ||
+    Array.isArray(schema.allOf) ||
+    Array.isArray(schema.anyOf) ||
+    Array.isArray(schema.oneOf);
+
+  if (isComposedObjectSchema || properties?.timeoutMs !== undefined) {
+    return SYNTHETIC_HOISTED_TIMEOUT_FIELD;
+  }
+
+  return DEFAULT_HOISTED_TIMEOUT_FIELD;
 }
 
 function extractTextContent(

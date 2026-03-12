@@ -81,7 +81,7 @@ describe("registerHoistedTools", () => {
       allOf: [
         {
           properties: {
-            timeoutMs: {
+            __mcporterTimeoutMs: {
               type: "integer",
             },
           },
@@ -199,6 +199,61 @@ describe("registerHoistedTools", () => {
       timeoutMs: 45_000,
     });
   });
+
+  it("preserves tool-defined timeoutMs arguments in hoisted calls", async () => {
+    const definitions: HoistedDefinitionRecord[] = [];
+    const callTool = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "done" }],
+    });
+
+    registerHoistedTools(
+      createPiStub(definitions),
+      async () =>
+        ({
+          listServers: () => ["alpha"],
+          callTool,
+        }) as never,
+      new CatalogStore(),
+      [
+        demoTool("alpha", "lookup", {
+          type: "object",
+          properties: {
+            slug: { type: "string" },
+            timeoutMs: { type: "integer" },
+          },
+          required: ["slug", "timeoutMs"],
+        }),
+      ],
+      (override) => override ?? 30_000,
+      new Map<string, string>(),
+      new Set<string>(),
+    );
+
+    expect(definitions).toHaveLength(1);
+    expect(definitions[0]?.parameters).toMatchObject({
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        timeoutMs: { type: "integer" },
+        __mcporterTimeoutMs: { type: "integer" },
+      },
+      required: ["slug", "timeoutMs"],
+    });
+
+    await definitions[0]?.execute?.("call-1", {
+      slug: "abc",
+      timeoutMs: 15_000,
+      __mcporterTimeoutMs: 45_000,
+    });
+
+    expect(callTool).toHaveBeenCalledWith("alpha", "lookup", {
+      args: {
+        slug: "abc",
+        timeoutMs: 15_000,
+      },
+      timeoutMs: 45_000,
+    });
+  });
 });
 
 type HoistedDefinitionRecord = {
@@ -233,7 +288,8 @@ function createPiStub(
       ].map((name) => ({ name, description: name }));
     },
     registerTool(definition: unknown) {
-      const { execute, name, parameters } = definition as HoistedDefinitionRecord;
+      const { execute, name, parameters } =
+        definition as HoistedDefinitionRecord;
       const existingIndex = definitions.findIndex(
         (definition) => definition.name === name,
       );
