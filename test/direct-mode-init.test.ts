@@ -5,6 +5,92 @@ import { describe, expect, it, vi } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
 
 describe("direct mode extension initialization", () => {
+  it("defers direct-tool activation until the Pi registry becomes available", async () => {
+    vi.resetModules();
+
+    const runtime = createRuntimeStub(
+      async (server) => [demoTool(server, "list_items")],
+      ["alpha"],
+    );
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+    const registeredTools: string[] = [];
+    let runtimeBound = false;
+    let beforeAgentStart: (() => Promise<void>) | undefined;
+    let activeTools = ["mcporter", "bash", "read", "edit"];
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(settingsPath, JSON.stringify({ mode: "direct" }), "utf8");
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      await mcporterExtension({
+        on(event: string, handler: unknown) {
+          if (event === "before_agent_start") {
+            beforeAgentStart = handler as () => Promise<void>;
+          }
+        },
+        registerCommand() {},
+        getAllTools() {
+          if (!runtimeBound) {
+            throw new Error("Extension runtime not initialized");
+          }
+          return registeredTools.map((name) => ({ name, description: name }));
+        },
+        getActiveTools() {
+          if (!runtimeBound) {
+            throw new Error("Extension runtime not initialized");
+          }
+          return [...activeTools];
+        },
+        registerTool(definition: unknown) {
+          upsertRegisteredTool(
+            registeredTools,
+            (definition as { name: string }).name,
+          );
+        },
+        setActiveTools(toolNames: string[]) {
+          if (!runtimeBound) {
+            throw new Error("Extension runtime not initialized");
+          }
+          activeTools = [...toolNames];
+        },
+      } as never);
+
+      expect(beforeAgentStart).toBeTypeOf("function");
+      await expect(beforeAgentStart?.()).resolves.toBeUndefined();
+      expect(registeredTools).toEqual(["mcporter"]);
+      expect(activeTools).not.toContain("mcp__alpha__list_items");
+
+      runtimeBound = true;
+      await beforeAgentStart?.();
+
+      expect(registeredTools).toContain("mcp__alpha__list_items");
+      expect(activeTools).toContain("mcp__alpha__list_items");
+      expect(activeTools).toEqual(
+        expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("registers hoisted tools once the Pi tool registry becomes available", async () => {
     vi.resetModules();
 
@@ -598,6 +684,54 @@ describe("direct mode extension initialization", () => {
         expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
       );
       expect(activeTools).not.toContain("mcp__alpha__list_items");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("skips before_agent_start warmup in lazy mode", async () => {
+    vi.resetModules();
+
+    const createRuntime = vi.fn();
+    vi.doMock("mcporter", () => ({ createRuntime }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const previousHome = process.env.HOME;
+    let beforeAgentStart: (() => Promise<void>) | undefined;
+
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      await mcporterExtension({
+        on(event: string, handler: unknown) {
+          if (event === "before_agent_start") {
+            beforeAgentStart = handler as () => Promise<void>;
+          }
+        },
+        registerCommand() {},
+        getAllTools() {
+          return [{ name: "mcporter", description: "mcporter" }];
+        },
+        getActiveTools() {
+          return ["mcporter", "bash", "read", "edit"];
+        },
+        registerTool() {},
+        setActiveTools() {},
+      } as never);
+
+      expect(beforeAgentStart).toBeTypeOf("function");
+      await expect(beforeAgentStart?.()).resolves.toBeUndefined();
+      expect(createRuntime).not.toHaveBeenCalled();
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

@@ -168,7 +168,9 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async () => {
-    await controller.warmup();
+    if (await controller.shouldWarmupBeforeAgentStart()) {
+      await controller.warmup();
+    }
   });
 
   pi.on("session_shutdown", async () => {

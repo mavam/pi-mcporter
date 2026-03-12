@@ -178,7 +178,12 @@ export function createMcporterController(
 
   function syncHoistedToolActivation(nextToolNames: Iterable<string>): void {
     const desiredToolNames = new Set(nextToolNames);
-    const activeToolNames = new Set(pi.getActiveTools());
+    let activeToolNames: Set<string>;
+    try {
+      activeToolNames = new Set(pi.getActiveTools());
+    } catch {
+      return;
+    }
 
     for (const toolName of activeHoistedToolNames) {
       if (!desiredToolNames.has(toolName)) {
@@ -190,8 +195,12 @@ export function createMcporterController(
       activeToolNames.add(toolName);
     }
 
-    activeHoistedToolNames = desiredToolNames;
-    pi.setActiveTools([...activeToolNames]);
+    try {
+      pi.setActiveTools([...activeToolNames]);
+      activeHoistedToolNames = desiredToolNames;
+    } catch {
+      // Pi may not expose an active-tool registry yet during early startup.
+    }
   }
 
   async function warmup(): Promise<StartupStatus> {
@@ -223,6 +232,15 @@ export function createMcporterController(
     });
 
     return await warmupPromise;
+  }
+
+  async function shouldWarmupBeforeAgentStart(): Promise<boolean> {
+    try {
+      const config = await ensureResolvedConfig();
+      return shouldPreloadCatalog(config.mode, config.serverModes);
+    } catch {
+      return true;
+    }
   }
 
   function getStartupMessages(status: StartupStatus = startupStatus): string[] {
@@ -270,6 +288,7 @@ export function createMcporterController(
     getStartupMessages,
     resolveCallTimeout,
     shutdown,
+    shouldWarmupBeforeAgentStart,
     warmup,
   };
 }
