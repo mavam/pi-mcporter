@@ -17,7 +17,6 @@ import type { CatalogStore } from "./catalog-store.js";
 import { formatArgsObjectKeyValuePreview } from "./call-args-preview.js";
 import { DEFAULT_CALL_TIMEOUT_MS, MAX_CALL_TIMEOUT_MS } from "./constants.js";
 import { isPlainObject } from "./helpers.js";
-import { withPromptMetadata } from "./tool-registration.js";
 import type { CatalogTool, ToolDetails } from "./types.js";
 
 const DEFAULT_HOISTED_TIMEOUT_FIELD = "timeoutMs";
@@ -67,77 +66,69 @@ function createHoistedToolDefinition(
   resolveCallTimeout: (override?: number) => number,
 ): ToolDefinition<TSchema, ToolDetails> {
   const timeoutField = getHoistedTimeoutField(tool);
-  return withPromptMetadata(
-    {
-      name,
-      label: tool.selector,
-      description: buildHoistedDescription(tool),
-      parameters: normalizeHoistedParameters(tool, timeoutField),
-      async execute(_toolCallId, rawParams, signal, _onUpdate, _ctx) {
-        const activeRuntime = await ensureRuntime();
-        const rawArgs = isPlainObject(rawParams) ? rawParams : {};
-        const timeoutMs = rawArgs[timeoutField];
-        const args =
-          timeoutField in rawArgs
-            ? Object.fromEntries(
-                Object.entries(rawArgs).filter(([key]) => key !== timeoutField),
-              )
-            : rawArgs;
-        return await handleCallAction(
-          activeRuntime,
-          {
-            action: "call",
-            selector: tool.selector,
-            args,
-            ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
-          },
-          signal,
-          catalogStore,
-          resolveCallTimeout,
-        );
-      },
-      renderCall(args, theme) {
-        return renderHoistedCallHeader(
-          tool.selector,
-          isPlainObject(args) ? args : {},
+  return {
+    name,
+    label: tool.selector,
+    description: buildHoistedDescription(tool),
+    parameters: normalizeHoistedParameters(tool, timeoutField),
+    async execute(_toolCallId, rawParams, signal, _onUpdate, _ctx) {
+      const activeRuntime = await ensureRuntime();
+      const rawArgs = isPlainObject(rawParams) ? rawParams : {};
+      const timeoutMs = rawArgs[timeoutField];
+      const args =
+        timeoutField in rawArgs
+          ? Object.fromEntries(
+              Object.entries(rawArgs).filter(([key]) => key !== timeoutField),
+            )
+          : rawArgs;
+      return await handleCallAction(
+        activeRuntime,
+        {
+          action: "call",
+          selector: tool.selector,
+          args,
+          ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+        },
+        signal,
+        catalogStore,
+        resolveCallTimeout,
+      );
+    },
+    renderCall(args, theme) {
+      return renderHoistedCallHeader(
+        tool.selector,
+        isPlainObject(args) ? args : {},
+        theme,
+      );
+    },
+    renderResult(result, { expanded, isPartial }, theme) {
+      const details = result.details as ToolDetails | undefined;
+      const text = extractTextContent(result.content);
+      const isError = Boolean((result as { isError?: boolean }).isError);
+
+      if (isPartial) {
+        return renderSimpleText(text ?? "Working…", theme, "warning");
+      }
+
+      if (isError) {
+        return renderBlockText(
+          text ?? `${tool.selector} failed`,
           theme,
+          "error",
         );
-      },
-      renderResult(result, { expanded, isPartial }, theme) {
-        const details = result.details as ToolDetails | undefined;
-        const text = extractTextContent(result.content);
-        const isError = Boolean((result as { isError?: boolean }).isError);
+      }
 
-        if (isPartial) {
-          return renderSimpleText(text ?? "Working…", theme, "warning");
-        }
+      if (expanded) {
+        return renderBlockText(text ?? "", theme, "toolOutput");
+      }
 
-        if (isError) {
-          return renderBlockText(
-            text ?? `${tool.selector} failed`,
-            theme,
-            "error",
-          );
-        }
-
-        if (expanded) {
-          return renderBlockText(text ?? "", theme, "toolOutput");
-        }
-
-        const summary =
-          details?.callOutputSummary ?? `${tool.selector}: output available`;
-        let summaryText = theme.fg("success", summary);
-        summaryText += theme.fg("muted", ` (${getExpandHint()})`);
-        return new Text(summaryText, 0, 0);
-      },
+      const summary =
+        details?.callOutputSummary ?? `${tool.selector}: output available`;
+      let summaryText = theme.fg("success", summary);
+      summaryText += theme.fg("muted", ` (${getExpandHint()})`);
+      return new Text(summaryText, 0, 0);
     },
-    {
-      promptSnippet: buildHoistedPromptSnippet(tool),
-      promptGuidelines: [
-        `Call '${tool.selector}' directly when it clearly matches the user's request.`,
-      ],
-    },
-  );
+  };
 }
 
 function sanitizeToolNamePart(value: string): string {
@@ -173,11 +164,6 @@ function buildHoistedDescription(tool: CatalogTool): string {
   return `Call MCP tool '${tool.selector}'.`;
 }
 
-function buildHoistedPromptSnippet(tool: CatalogTool): string {
-  const description = tool.description?.trim();
-  return description ? `${tool.selector} — ${description}` : tool.selector;
-}
-
 function normalizeHoistedParameters(
   tool: CatalogTool,
   timeoutField: string,
@@ -189,47 +175,12 @@ function normalizeHoistedParameters(
       description: `Per-call timeout in milliseconds (default ${DEFAULT_CALL_TIMEOUT_MS}).`,
     }),
   );
-  const timeoutSchema = Type.Object(
-    {
-      [timeoutField]: timeoutProperty,
-    },
-    {
-      additionalProperties: true,
-      description: `Wrapper parameters for '${tool.selector}'.`,
-    },
-  );
-
   if (isPlainObject(tool.inputSchema)) {
-    const schema = { ...tool.inputSchema } as Record<string, unknown>;
-    const hasProperties = isPlainObject(schema.properties);
-    const isComposedObjectSchema =
-      "$ref" in schema ||
-      Array.isArray(schema.allOf) ||
-      Array.isArray(schema.anyOf) ||
-      Array.isArray(schema.oneOf);
-
-    if (schema.type === undefined && hasProperties) {
-      schema.type = "object";
-    }
-    if (schema.type === "object" && schema.additionalProperties === undefined) {
-      schema.additionalProperties = true;
-    }
-    if (schema.type === "object") {
-      const properties = hasProperties
-        ? { ...(schema.properties as Record<string, unknown>) }
-        : {};
-      properties[timeoutField] ??= timeoutProperty;
-      schema.properties = properties;
+    const schema = structuredClone(tool.inputSchema) as Record<string, unknown>;
+    if (
+      augmentSchemaWithTimeout(schema, schema, timeoutField, timeoutProperty)
+    ) {
       return schema as TSchema;
-    }
-    if (isComposedObjectSchema) {
-      const allOf = Array.isArray(schema.allOf)
-        ? [...schema.allOf, timeoutSchema]
-        : [timeoutSchema];
-      return {
-        ...schema,
-        allOf,
-      } as unknown as TSchema;
     }
   }
 
@@ -265,6 +216,93 @@ function getHoistedTimeoutField(tool: CatalogTool): string {
   }
 
   return DEFAULT_HOISTED_TIMEOUT_FIELD;
+}
+
+function augmentSchemaWithTimeout(
+  schema: Record<string, unknown>,
+  rootSchema: Record<string, unknown>,
+  timeoutField: string,
+  timeoutProperty: TSchema,
+  visited = new Set<Record<string, unknown>>(),
+): boolean {
+  if (visited.has(schema)) {
+    return false;
+  }
+  visited.add(schema);
+
+  let touched = false;
+  const hasProperties = isPlainObject(schema.properties);
+  if (schema.type === undefined && hasProperties) {
+    schema.type = "object";
+  }
+
+  if (schema.type === "object") {
+    const properties = hasProperties
+      ? { ...(schema.properties as Record<string, unknown>) }
+      : {};
+    properties[timeoutField] ??= structuredClone(timeoutProperty);
+    schema.properties = properties;
+    touched = true;
+  }
+
+  if (typeof schema.$ref === "string") {
+    const referenced = resolveLocalSchemaReference(rootSchema, schema.$ref);
+    if (referenced) {
+      touched =
+        augmentSchemaWithTimeout(
+          referenced,
+          rootSchema,
+          timeoutField,
+          timeoutProperty,
+          visited,
+        ) || touched;
+    }
+  }
+
+  for (const key of ["allOf", "anyOf", "oneOf"] as const) {
+    const variants = schema[key];
+    if (!Array.isArray(variants)) {
+      continue;
+    }
+    for (const variant of variants) {
+      if (!isPlainObject(variant)) {
+        continue;
+      }
+      touched =
+        augmentSchemaWithTimeout(
+          variant,
+          rootSchema,
+          timeoutField,
+          timeoutProperty,
+          visited,
+        ) || touched;
+    }
+  }
+
+  return touched;
+}
+
+function resolveLocalSchemaReference(
+  rootSchema: Record<string, unknown>,
+  ref: string,
+): Record<string, unknown> | undefined {
+  if (!ref.startsWith("#/")) {
+    return undefined;
+  }
+
+  let current: unknown = rootSchema;
+  for (const segment of ref.slice(2).split("/").map(decodeJsonPointerSegment)) {
+    if (!isPlainObject(current) || !(segment in current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+
+  return isPlainObject(current) ? current : undefined;
+}
+
+function decodeJsonPointerSegment(segment: string): string {
+  return segment.replace(/~1/g, "/").replace(/~0/g, "~");
 }
 
 function extractTextContent(

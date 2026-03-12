@@ -283,6 +283,69 @@ describe("direct mode extension initialization", () => {
     }
   });
 
+  it("injects warmed preload catalog metadata into the system prompt", async () => {
+    vi.resetModules();
+
+    const listTools = vi
+      .fn<Runtime["listTools"]>()
+      .mockImplementation(async (server) => [
+        demoTool(server, "list_items"),
+        demoTool(server, "create_item"),
+      ]);
+    const runtime = createRuntimeStub(listTools, ["alpha"]);
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(settingsPath, JSON.stringify({ mode: "preload" }), "utf8");
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+      const pi = createExtensionPiStub();
+
+      await mcporterExtension(pi.api);
+
+      const result = await pi.beforeAgentStart({
+        prompt: "show me my items",
+        images: [],
+        systemPrompt: "Base system prompt",
+      });
+
+      expect(listTools).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        systemPrompt: expect.stringContaining(
+          "MCPorter preloaded MCP catalog metadata for this turn.",
+        ),
+      });
+      expect((result as { systemPrompt: string }).systemPrompt).toContain(
+        "alpha.create_item",
+      );
+      expect((result as { systemPrompt: string }).systemPrompt).toContain(
+        "alpha.list_items",
+      );
+      expect((result as { systemPrompt: string }).systemPrompt).toContain(
+        "action='call' directly",
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("resolves before_agent_start when settings are malformed and fails on tool use", async () => {
     vi.resetModules();
 
@@ -511,7 +574,7 @@ function createExtensionPiStub(
 ) {
   const registeredTools: string[] = [];
   const notifications: Array<{ level: string; message: string }> = [];
-  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
   let activeTools = [...initialActiveTools];
   let mcporterTool:
     | {
@@ -560,8 +623,8 @@ function createExtensionPiStub(
     },
     notifications,
     registeredTools,
-    async beforeAgentStart() {
-      await handlers.get("before_agent_start")?.();
+    async beforeAgentStart(event: unknown = {}) {
+      return await handlers.get("before_agent_start")?.(event);
     },
     async sessionShutdown() {
       await handlers.get("session_shutdown")?.();

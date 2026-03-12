@@ -3,17 +3,19 @@ import { createRuntime, type Runtime } from "mcporter";
 import { CatalogStore } from "./catalog-store.js";
 import { toErrorMessage } from "./helpers.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
-import { shouldPreloadCatalog } from "./mode.js";
+import { resolveServerMode, shouldPreloadCatalog } from "./mode.js";
 import {
   getDefaultMcporterSettings,
   loadResolvedMcporterConfig,
   type ResolvedMcporterConfig,
 } from "./settings.js";
 import { preloadCatalogForMode, type PreloadSummary } from "./startup.js";
+import { buildCatalogSystemPromptAppend } from "./system-prompt.js";
 import {
   createToolExposureManager,
   type EffectiveResolvedMcporterConfig,
 } from "./tool-exposure.js";
+import type { CatalogTool } from "./types.js";
 
 export interface StartupStatus {
   error?: string;
@@ -245,6 +247,35 @@ export function createMcporterController(
     );
   }
 
+  async function buildSystemPromptAppend(): Promise<string | undefined> {
+    try {
+      const config = await ensureEffectiveConfig();
+      if (!shouldPreloadCatalog(config.mode, config.serverModes)) {
+        return undefined;
+      }
+
+      const activeRuntime = await ensureRuntime();
+      await ensurePreload(activeRuntime);
+
+      const tools: CatalogTool[] = [];
+      for (const server of activeRuntime.listServers()) {
+        if (
+          resolveServerMode(config.mode, config.serverModes, server) === "lazy"
+        ) {
+          continue;
+        }
+        const cachedTools = catalogStore.getCachedToolsForServer(server);
+        if (cachedTools) {
+          tools.push(...cachedTools);
+        }
+      }
+
+      return buildCatalogSystemPromptAppend(tools);
+    } catch {
+      return undefined;
+    }
+  }
+
   async function shutdown(): Promise<void> {
     lifecycleGeneration += 1;
     const activeRuntime = runtime;
@@ -266,6 +297,7 @@ export function createMcporterController(
 
   return {
     catalogStore,
+    buildSystemPromptAppend,
     ensureRuntime,
     getStartupMessages,
     resolveCallTimeout,

@@ -27,7 +27,6 @@ import {
 import { resolveMcporterMode } from "./mode.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
-import { withPromptMetadata } from "./tool-registration.js";
 import type { ToolDetails } from "./types.js";
 
 const PACKAGE_VERSION: string = await readFile(
@@ -42,118 +41,107 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     packageVersion: PACKAGE_VERSION,
   });
 
-  pi.registerTool(
-    withPromptMetadata(
-      {
-        name: "mcporter",
-        label: "MCPorter",
-        description:
-          `Discover and call MCP tools through MCPorter using one stable proxy tool. ` +
-          `Use action='call' directly when you already know the selector, action='describe' when you need schema details, and action='search' only to find unknown tools. ` +
-          `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} and saved to a temp file when truncated.`,
-        parameters: McporterParameters,
+  pi.registerTool({
+    name: "mcporter",
+    label: "MCPorter",
+    description:
+      `Discover and call MCP tools through MCPorter using one stable proxy tool. ` +
+      `Use action='call' directly when you already know the selector, action='describe' when you need schema details, and action='search' only to find unknown tools. ` +
+      `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} and saved to a temp file when truncated.`,
+    parameters: McporterParameters,
 
-        async execute(_toolCallId, rawParams, signal, onUpdate, _ctx) {
-          const params = rawParams as McporterParams;
-          const activeRuntime = await controller.ensureRuntime();
-          if (signal?.aborted) {
-            throw new Error("Cancelled.");
-          }
+    async execute(_toolCallId, rawParams, signal, onUpdate, _ctx) {
+      const params = rawParams as McporterParams;
+      const activeRuntime = await controller.ensureRuntime();
+      if (signal?.aborted) {
+        throw new Error("Cancelled.");
+      }
 
-          switch (params.action) {
-            case "search": {
-              onUpdate?.({
-                content: textContent("Refreshing MCP catalog…"),
-                details: { action: "search" },
-              });
-              return await handleSearchAction(
-                activeRuntime,
-                params,
-                signal,
-                controller.catalogStore,
-              );
-            }
-            case "describe": {
-              onUpdate?.({
-                content: textContent("Loading MCP tool metadata…"),
-                details: { action: "describe" },
-              });
-              return await handleDescribeAction(
-                activeRuntime,
-                params,
-                signal,
-                controller.catalogStore,
-              );
-            }
-            case "call": {
-              onUpdate?.({
-                content: textContent("Calling MCP tool…"),
-                details: { action: "call", selector: params.selector },
-              });
-              return await handleCallAction(
-                activeRuntime,
-                params,
-                signal,
-                controller.catalogStore,
-                controller.resolveCallTimeout,
-              );
-            }
-            default:
-              throw new Error(
-                `Unknown action '${String(params.action)}'. Use one of: search, describe, call.`,
-              );
-          }
-        },
+      switch (params.action) {
+        case "search": {
+          onUpdate?.({
+            content: textContent("Refreshing MCP catalog…"),
+            details: { action: "search" },
+          });
+          return await handleSearchAction(
+            activeRuntime,
+            params,
+            signal,
+            controller.catalogStore,
+          );
+        }
+        case "describe": {
+          onUpdate?.({
+            content: textContent("Loading MCP tool metadata…"),
+            details: { action: "describe" },
+          });
+          return await handleDescribeAction(
+            activeRuntime,
+            params,
+            signal,
+            controller.catalogStore,
+          );
+        }
+        case "call": {
+          onUpdate?.({
+            content: textContent("Calling MCP tool…"),
+            details: { action: "call", selector: params.selector },
+          });
+          return await handleCallAction(
+            activeRuntime,
+            params,
+            signal,
+            controller.catalogStore,
+            controller.resolveCallTimeout,
+          );
+        }
+        default:
+          throw new Error(
+            `Unknown action '${String(params.action)}'. Use one of: search, describe, call.`,
+          );
+      }
+    },
 
-        renderCall(args, theme) {
-          return renderCallHeader(args as McporterParams, theme);
-        },
+    renderCall(args, theme) {
+      return renderCallHeader(args as McporterParams, theme);
+    },
 
-        renderResult(result, { expanded, isPartial }, theme) {
-          const details = result.details as ToolDetails | undefined;
-          const text = extractTextContent(result.content);
-          const isError = Boolean((result as { isError?: boolean }).isError);
+    renderResult(result, { expanded, isPartial }, theme) {
+      const details = result.details as ToolDetails | undefined;
+      const text = extractTextContent(result.content);
+      const isError = Boolean((result as { isError?: boolean }).isError);
 
-          if (isPartial) {
-            return renderSimpleText(text ?? "Working…", theme, "warning");
-          }
+      if (isPartial) {
+        return renderSimpleText(text ?? "Working…", theme, "warning");
+      }
 
-          if (isError) {
-            return renderBlockText(text ?? "mcporter failed", theme, "error");
-          }
+      if (isError) {
+        return renderBlockText(text ?? "mcporter failed", theme, "error");
+      }
 
-          if (!details) {
-            return renderBlockText(text ?? "", theme, "toolOutput");
-          }
+      if (!details) {
+        return renderBlockText(text ?? "", theme, "toolOutput");
+      }
 
-          if (details.action !== "call") {
-            if (expanded) {
-              return renderBlockText(text ?? "", theme, "toolOutput");
-            }
-            return renderCollapsedActionSummary(details, text, theme);
-          }
+      if (details.action !== "call") {
+        if (expanded) {
+          return renderBlockText(text ?? "", theme, "toolOutput");
+        }
+        return renderCollapsedActionSummary(details, text, theme);
+      }
 
-          if (expanded) {
-            return renderBlockText(text ?? "", theme, "toolOutput");
-          }
+      if (expanded) {
+        return renderBlockText(text ?? "", theme, "toolOutput");
+      }
 
-          const summary =
-            details.callOutputSummary ??
-            `${details.selector ?? "mcporter call"}: output available`;
-          let summaryText = theme.fg("success", summary);
-          summaryText += theme.fg("muted", ` (${getExpandHint()})`);
-          return new Text(summaryText, 0, 0);
-        },
-      },
-      {
-        promptGuidelines: [
-          "Prefer action='call' when the MCP selector is already known or obvious from context.",
-          "Use action='describe' to inspect arguments or schema details before calling an unfamiliar MCP tool.",
-          "Use action='search' only when the needed MCP tool is still unknown.",
-        ],
-      },
-    ),
-  );
+      const summary =
+        details.callOutputSummary ??
+        `${details.selector ?? "mcporter call"}: output available`;
+      let summaryText = theme.fg("success", summary);
+      summaryText += theme.fg("muted", ` (${getExpandHint()})`);
+      return new Text(summaryText, 0, 0);
+    },
+  });
 
   pi.on("session_start", async (_event, ctx) => {
     const status = await controller.warmup();
@@ -167,9 +155,15 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (event) => {
     if (await controller.shouldWarmupBeforeAgentStart()) {
       await controller.warmup();
+      const systemPromptAppend = await controller.buildSystemPromptAppend();
+      if (systemPromptAppend) {
+        return {
+          systemPrompt: `${event.systemPrompt}\n\n${systemPromptAppend}`,
+        };
+      }
     }
   });
 

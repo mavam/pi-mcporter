@@ -60,6 +60,7 @@ describe("registerHoistedTools", () => {
                 slug: { type: "string" },
               },
               required: ["slug"],
+              additionalProperties: false,
             },
           },
         }),
@@ -75,18 +76,80 @@ describe("registerHoistedTools", () => {
       $defs: {
         Input: {
           type: "object",
+          additionalProperties: false,
           required: ["slug"],
-        },
-      },
-      allOf: [
-        {
           properties: {
             __mcporterTimeoutMs: {
               type: "integer",
             },
           },
         },
+      },
+    });
+  });
+
+  it("rewrites closed composed object schemas to admit timeout overrides", () => {
+    const definitions: HoistedDefinitionRecord[] = [];
+
+    registerHoistedTools(
+      createPiStub(definitions),
+      async () => {
+        throw new Error("not implemented");
+      },
+      new CatalogStore(),
+      [
+        demoTool("alpha", "lookup", {
+          allOf: [
+            { $ref: "#/$defs/BaseInput" },
+            {
+              type: "object",
+              properties: {
+                verbose: { type: "boolean" },
+              },
+              additionalProperties: false,
+            },
+          ],
+          $defs: {
+            BaseInput: {
+              type: "object",
+              properties: {
+                slug: { type: "string" },
+              },
+              required: ["slug"],
+              additionalProperties: false,
+            },
+          },
+        }),
       ],
+      () => 30_000,
+      new Map<string, string>(),
+      new Set<string>(),
+    );
+
+    expect(definitions).toHaveLength(1);
+    expect(definitions[0]?.parameters).toMatchObject({
+      allOf: [
+        { $ref: "#/$defs/BaseInput" },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            verbose: { type: "boolean" },
+            __mcporterTimeoutMs: { type: "integer" },
+          },
+        },
+      ],
+      $defs: {
+        BaseInput: {
+          type: "object",
+          additionalProperties: false,
+          required: ["slug"],
+          properties: {
+            slug: { type: "string" },
+            __mcporterTimeoutMs: { type: "integer" },
+          },
+        },
+      },
     });
   });
 
