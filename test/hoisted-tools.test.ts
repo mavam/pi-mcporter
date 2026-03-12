@@ -95,6 +95,7 @@ describe("registerHoistedTools", () => {
       () => 30_000,
       new Map<string, string>(),
       new Set<string>(),
+      existingToolNames,
     );
 
     expect(created).toEqual(["mcp__linear__list_issues__2"]);

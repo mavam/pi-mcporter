@@ -27,12 +27,10 @@ export function registerHoistedTools(
   resolveCallTimeout: (override?: number) => number,
   registeredSelectors: Map<string, string>,
   registeredNames: Set<string>,
+  occupiedToolNames: Iterable<string> = [],
 ): string[] {
   const activeToolNames: string[] = [];
-  const occupiedNames = new Set([
-    ...pi.getAllTools().map((tool) => tool.name),
-    ...registeredNames,
-  ]);
+  const occupiedNames = new Set([...occupiedToolNames, ...registeredNames]);
 
   for (const tool of tools) {
     const name =

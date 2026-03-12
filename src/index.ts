@@ -40,7 +40,7 @@ import {
   type McporterSettings,
 } from "./settings.js";
 import { withPromptMetadata } from "./tool-registration.js";
-import type { ToolDetails } from "./types.js";
+import type { CatalogTool, ToolDetails } from "./types.js";
 
 const PACKAGE_VERSION: string = await readFile(
   new URL("../package.json", import.meta.url),
@@ -63,6 +63,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
   const registeredToolNames = new Set<string>(["mcporter"]);
   let activeHoistedToolNames = new Set<string>();
   let desiredHoistedToolNames = new Set<string>();
+  let pendingHoistedTools: CatalogTool[] = [];
 
   pi.registerTool(
     withPromptMetadata(
@@ -181,6 +182,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
     try {
       const activeRuntime = await ensureRuntime();
       await ensurePreload(activeRuntime);
+      registerPendingHoistedTools();
       syncHoistedToolActivation(desiredHoistedToolNames);
     } catch (error) {
       preloadError = toErrorMessage(error);
@@ -198,6 +200,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
   pi.on("before_agent_start", async () => {
     const activeRuntime = await ensureRuntime();
     await ensurePreload(activeRuntime);
+    registerPendingHoistedTools();
     syncHoistedToolActivation(desiredHoistedToolNames);
   });
 
@@ -211,6 +214,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
     settings = getDefaultMcporterSettings();
     settingsPromise = undefined;
     catalogStore.clear();
+    pendingHoistedTools = [];
     desiredHoistedToolNames = new Set();
     syncHoistedToolActivation([]);
 
@@ -241,25 +245,9 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
         .then((summary) => {
           preloadWarnings = summary.warnings;
           preloadError = undefined;
+          pendingHoistedTools = summary.hoistedTools;
 
-          if (summary.hoistedTools.length > 0) {
-            const hoistedToolNames = registerHoistedTools(
-              pi,
-              ensureRuntime,
-              catalogStore,
-              summary.hoistedTools,
-              resolveCallTimeout,
-              registeredHoistedSelectors,
-              registeredHoistedNames,
-              getOccupiedToolNames(),
-            );
-            desiredHoistedToolNames = new Set(hoistedToolNames);
-            for (const toolName of hoistedToolNames) {
-              registeredToolNames.add(toolName);
-            }
-          } else {
-            desiredHoistedToolNames = new Set();
-          }
+          registerPendingHoistedTools();
         })
         .catch((error) => {
           preloadPromise = undefined;
@@ -318,18 +306,58 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
     return await settingsPromise;
   }
 
-  function getOccupiedToolNames(): Set<string> {
+  function registerPendingHoistedTools(): void {
+    if (pendingHoistedTools.length === 0) {
+      desiredHoistedToolNames = new Set();
+      return;
+    }
+
+    const { occupiedToolNames, registryAvailable } = getOccupiedToolNames();
+    const hasUnnamedHoistedTools = pendingHoistedTools.some(
+      (tool) => !registeredHoistedSelectors.has(tool.selector),
+    );
+
+    if (!registryAvailable && hasUnnamedHoistedTools) {
+      desiredHoistedToolNames = new Set(
+        pendingHoistedTools.flatMap((tool) => {
+          const name = registeredHoistedSelectors.get(tool.selector);
+          return name ? [name] : [];
+        }),
+      );
+      return;
+    }
+
+    const hoistedToolNames = registerHoistedTools(
+      pi,
+      ensureRuntime,
+      catalogStore,
+      pendingHoistedTools,
+      resolveCallTimeout,
+      registeredHoistedSelectors,
+      registeredHoistedNames,
+      occupiedToolNames,
+    );
+    desiredHoistedToolNames = new Set(hoistedToolNames);
+    for (const toolName of hoistedToolNames) {
+      registeredToolNames.add(toolName);
+    }
+  }
+
+  function getOccupiedToolNames(): {
+    occupiedToolNames: Set<string>;
+    registryAvailable: boolean;
+  } {
     const occupiedToolNames = new Set(registeredToolNames);
 
     try {
       for (const tool of pi.getAllTools()) {
         occupiedToolNames.add(tool.name);
       }
+      return { occupiedToolNames, registryAvailable: true };
     } catch {
       // Some tests and older runtimes may not expose the registry this early.
+      return { occupiedToolNames, registryAvailable: false };
     }
-
-    return occupiedToolNames;
   }
 
   function resolveConfiguredPath(

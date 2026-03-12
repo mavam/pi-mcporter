@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
 
 describe("direct mode extension initialization", () => {
-  it("registers hoisted tools before load completes and activates them after session start", async () => {
+  it("registers hoisted tools once the Pi tool registry becomes available", async () => {
     vi.resetModules();
 
     const runtime = createRuntimeStub(
@@ -70,13 +70,13 @@ describe("direct mode extension initialization", () => {
         },
       } as never);
 
-      expect(registeredTools).toContain("mcporter");
-      expect(registeredTools).toContain("mcp__alpha__list_items");
+      expect(registeredTools).toEqual(["mcporter"]);
       expect(activeTools).not.toContain("mcp__alpha__list_items");
 
       runtimeBound = true;
       await sessionStart?.({}, { hasUI: false });
 
+      expect(registeredTools).toContain("mcp__alpha__list_items");
       expect(activeTools).toContain("mcp__alpha__list_items");
       expect(activeTools).toEqual(
         expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
@@ -141,6 +141,100 @@ describe("direct mode extension initialization", () => {
         "mcporter",
         "mcp__alpha__list_items__2",
       ]);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for the Pi tool registry before assigning colliding hoisted names", async () => {
+    vi.resetModules();
+
+    const runtime = createRuntimeStub(
+      async (server) => [demoTool(server, "list_items")],
+      ["alpha"],
+    );
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+    const registeredTools = ["mcp__alpha__list_items"];
+    let runtimeBound = false;
+    let sessionStart:
+      | ((event: unknown, ctx: { hasUI: boolean }) => Promise<void>)
+      | undefined;
+    let activeTools = ["mcporter", "bash", "read", "edit"];
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(settingsPath, JSON.stringify({ mode: "direct" }), "utf8");
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      await mcporterExtension({
+        on(event: string, handler: unknown) {
+          if (event === "session_start") {
+            sessionStart = handler as (
+              event: unknown,
+              ctx: { hasUI: boolean },
+            ) => Promise<void>;
+          }
+        },
+        registerCommand() {},
+        getAllTools() {
+          if (!runtimeBound) {
+            throw new Error("Extension runtime not initialized");
+          }
+          return registeredTools.map((name) => ({ name, description: name }));
+        },
+        getActiveTools() {
+          if (!runtimeBound) {
+            throw new Error("Extension runtime not initialized");
+          }
+          return [...activeTools];
+        },
+        registerTool(definition: unknown) {
+          upsertRegisteredTool(
+            registeredTools,
+            (definition as { name: string }).name,
+          );
+        },
+        setActiveTools(toolNames: string[]) {
+          if (!runtimeBound) {
+            throw new Error("Extension runtime not initialized");
+          }
+          activeTools = [...toolNames];
+        },
+      } as never);
+
+      expect(registeredTools).toEqual(["mcp__alpha__list_items", "mcporter"]);
+      expect(activeTools).not.toContain("mcp__alpha__list_items__2");
+
+      runtimeBound = true;
+      await sessionStart?.({}, { hasUI: false });
+
+      expect(registeredTools).toEqual([
+        "mcp__alpha__list_items",
+        "mcporter",
+        "mcp__alpha__list_items__2",
+      ]);
+      expect(activeTools).toContain("mcp__alpha__list_items__2");
+      expect(activeTools).not.toContain("mcp__alpha__list_items");
+      expect(activeTools).toEqual(
+        expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
+      );
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -317,9 +411,7 @@ describe("direct mode extension initialization", () => {
         },
       } as never);
 
-      expect(
-        registeredTools.filter((name) => name === "mcp__alpha__list_items"),
-      ).toHaveLength(1);
+      expect(registeredTools).toEqual(["mcporter"]);
 
       runtimeBound = true;
       await sessionStart?.({}, { hasUI: false });
