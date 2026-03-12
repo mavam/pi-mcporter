@@ -10,16 +10,21 @@ export interface CatalogStoreOptions {
   listTimeoutMs?: number;
 }
 
+interface CatalogLoad<T> {
+  promise: Promise<T>;
+  timeoutMs: number | undefined;
+}
+
 export class CatalogStore {
   private readonly listTimeoutMs: number;
   private basicCatalogCache: Cached<CatalogSnapshot> | undefined;
   private basicCatalogLoad: Promise<CatalogSnapshot> | undefined;
 
   private basicServerCatalogCache = new Map<string, Cached<CatalogTool[]>>();
-  private basicServerCatalogLoads = new Map<string, Promise<CatalogTool[]>>();
+  private basicServerCatalogLoads = new Map<string, CatalogLoad<CatalogTool[]>>();
 
   private schemaCatalogCache = new Map<string, Cached<CatalogTool[]>>();
-  private schemaCatalogLoads = new Map<string, Promise<CatalogTool[]>>();
+  private schemaCatalogLoads = new Map<string, CatalogLoad<CatalogTool[]>>();
 
   constructor(options: CatalogStoreOptions = {}) {
     this.listTimeoutMs =
@@ -158,8 +163,8 @@ export class CatalogStore {
     }
 
     const loading = this.basicServerCatalogLoads.get(server);
-    if (loading) {
-      return loading;
+    if (loading && hasMatchingTimeoutProfile(loading.timeoutMs, timeoutMs)) {
+      return loading.promise;
     }
 
     const load = this.listToolsWithTimeout(
@@ -189,7 +194,10 @@ export class CatalogStore {
         this.basicServerCatalogLoads.delete(server);
       });
 
-    this.basicServerCatalogLoads.set(server, load);
+    this.basicServerCatalogLoads.set(server, {
+      promise: load,
+      timeoutMs,
+    });
     return load;
   }
 
@@ -223,8 +231,8 @@ export class CatalogStore {
     }
 
     const loading = this.schemaCatalogLoads.get(server);
-    if (loading) {
-      return loading;
+    if (loading && hasMatchingTimeoutProfile(loading.timeoutMs, timeoutMs)) {
+      return loading.promise;
     }
 
     const load = this.listToolsWithTimeout(
@@ -258,7 +266,10 @@ export class CatalogStore {
         this.schemaCatalogLoads.delete(server);
       });
 
-    this.schemaCatalogLoads.set(server, load);
+    this.schemaCatalogLoads.set(server, {
+      promise: load,
+      timeoutMs,
+    });
     return load;
   }
 
@@ -311,6 +322,13 @@ function raceWithTimeout<T>(
       },
     );
   });
+}
+
+function hasMatchingTimeoutProfile(
+  currentTimeoutMs: number | undefined,
+  requestedTimeoutMs: number | undefined,
+): boolean {
+  return currentTimeoutMs === requestedTimeoutMs;
 }
 
 function toCatalogTool(server: string, tool: ServerToolInfo): CatalogTool {

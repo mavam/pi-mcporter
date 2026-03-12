@@ -4,6 +4,41 @@ import { CatalogStore } from "../src/catalog-store.ts";
 import { preloadCatalogForMode } from "../src/startup.ts";
 
 describe("CatalogStore preload timeouts", () => {
+  it("does not reuse in-flight preload schema requests for interactive reads", async () => {
+    const store = new CatalogStore({ listTimeoutMs: 10 });
+    let schemaCalls = 0;
+    const runtime = createRuntimeStub(async (_server, options) => {
+      schemaCalls += 1;
+      await delay(options?.includeSchema ? 30 : 0);
+      return [demoTool("alpha", "lookup")];
+    });
+
+    const preloadResult = store
+      .preloadServerCatalogWithSchema(runtime, "alpha")
+      .then(
+        () => ({ ok: true as const }),
+        (error) => ({ ok: false as const, error }),
+      );
+    await delay(5);
+
+    await expect(
+      store.getServerCatalogWithSchema(runtime, "alpha"),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        selector: "alpha.lookup",
+      }),
+    ]);
+    await expect(preloadResult).resolves.toMatchObject({
+      ok: false,
+      error: expect.objectContaining({
+        message: expect.stringContaining(
+          "Timed out loading MCP tool catalog for 'alpha'",
+        ),
+      }),
+    });
+    expect(schemaCalls).toBe(2);
+  });
+
   it("does not apply preload timeouts to interactive schema reads", async () => {
     const store = new CatalogStore({ listTimeoutMs: 10 });
     const runtime = createRuntimeStub(async () => {
@@ -30,6 +65,35 @@ describe("CatalogStore preload timeouts", () => {
     await expect(
       store.preloadServerCatalogWithSchema(runtime, "alpha"),
     ).rejects.toThrow("Timed out loading MCP tool catalog for 'alpha'");
+  });
+
+  it("does not reuse in-flight preload basic requests for interactive reads", async () => {
+    const store = new CatalogStore({ listTimeoutMs: 10 });
+    let basicCalls = 0;
+    const runtime = createRuntimeStub(async (_server, options) => {
+      basicCalls += 1;
+      await delay(options?.includeSchema ? 0 : 30);
+      return [demoTool("alpha", "lookup")];
+    });
+
+    const preloadResult = store.preloadServerCatalogBasic(runtime, "alpha").then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    );
+    await delay(5);
+
+    await expect(store.getServerCatalogBasic(runtime, "alpha")).resolves.toEqual(
+      [expect.objectContaining({ selector: "alpha.lookup" })],
+    );
+    await expect(preloadResult).resolves.toMatchObject({
+      ok: false,
+      error: expect.objectContaining({
+        message: expect.stringContaining(
+          "Timed out loading MCP tool catalog for 'alpha'",
+        ),
+      }),
+    });
+    expect(basicCalls).toBe(2);
   });
 
   it("falls back to basic discovery after schema preload failures", async () => {
