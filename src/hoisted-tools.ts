@@ -15,6 +15,10 @@ import type { Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import type { CatalogStore } from "./catalog-store.js";
 import { formatArgsObjectKeyValuePreview } from "./call-args-preview.js";
+import {
+  DEFAULT_CALL_TIMEOUT_MS,
+  MAX_CALL_TIMEOUT_MS,
+} from "./constants.js";
 import { isPlainObject } from "./helpers.js";
 import { withPromptMetadata } from "./tool-registration.js";
 import type { CatalogTool, ToolDetails } from "./types.js";
@@ -70,13 +74,15 @@ function createHoistedToolDefinition(
       parameters: normalizeHoistedParameters(tool),
       async execute(_toolCallId, rawParams, signal, _onUpdate, _ctx) {
         const activeRuntime = await ensureRuntime();
-        const args = isPlainObject(rawParams) ? rawParams : {};
+        const rawArgs = isPlainObject(rawParams) ? rawParams : {};
+        const { timeoutMs, ...args } = rawArgs;
         return await handleCallAction(
           activeRuntime,
           {
             action: "call",
             selector: tool.selector,
             args,
+            ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
           },
           signal,
           catalogStore,
@@ -166,6 +172,23 @@ function buildHoistedPromptSnippet(tool: CatalogTool): string {
 }
 
 function normalizeHoistedParameters(tool: CatalogTool): TSchema {
+  const timeoutProperty = Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: MAX_CALL_TIMEOUT_MS,
+      description: `Per-call timeout in milliseconds (default ${DEFAULT_CALL_TIMEOUT_MS}).`,
+    }),
+  );
+  const timeoutSchema = Type.Object(
+    {
+      timeoutMs: timeoutProperty,
+    },
+    {
+      additionalProperties: true,
+      description: `Wrapper parameters for '${tool.selector}'.`,
+    },
+  );
+
   if (isPlainObject(tool.inputSchema)) {
     const schema = { ...tool.inputSchema } as Record<string, unknown>;
     const hasProperties = isPlainObject(schema.properties);
@@ -181,13 +204,29 @@ function normalizeHoistedParameters(tool: CatalogTool): TSchema {
     if (schema.type === "object" && schema.additionalProperties === undefined) {
       schema.additionalProperties = true;
     }
-    if (schema.type === "object" || isComposedObjectSchema) {
+    if (schema.type === "object") {
+      const properties = hasProperties
+        ? { ...(schema.properties as Record<string, unknown>) }
+        : {};
+      properties.timeoutMs ??= timeoutProperty;
+      schema.properties = properties;
       return schema as TSchema;
+    }
+    if (isComposedObjectSchema) {
+      const allOf = Array.isArray(schema.allOf)
+        ? [...schema.allOf, timeoutSchema]
+        : [timeoutSchema];
+      return {
+        ...schema,
+        allOf,
+      } as unknown as TSchema;
     }
   }
 
   return Type.Object(
-    {},
+    {
+      timeoutMs: timeoutProperty,
+    },
     {
       additionalProperties: true,
       description: `Arguments object for '${tool.selector}'.`,

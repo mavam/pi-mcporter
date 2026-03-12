@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CatalogStore } from "../src/catalog-store.ts";
 import { registerHoistedTools } from "../src/hoisted-tools.ts";
 import type { CatalogTool } from "../src/types.ts";
@@ -42,7 +42,7 @@ describe("registerHoistedTools", () => {
   });
 
   it("preserves hoisted root reference schemas", () => {
-    const definitions: Array<{ name: string; parameters: unknown }> = [];
+    const definitions: HoistedDefinitionRecord[] = [];
 
     registerHoistedTools(
       createPiStub(definitions),
@@ -78,11 +78,20 @@ describe("registerHoistedTools", () => {
           required: ["slug"],
         },
       },
+      allOf: [
+        {
+          properties: {
+            timeoutMs: {
+              type: "integer",
+            },
+          },
+        },
+      ],
     });
   });
 
   it("suffixes hoisted names when Pi already exposes the generated name", () => {
-    const definitions: Array<{ name: string }> = [];
+    const definitions: HoistedDefinitionRecord[] = [];
     const existingToolNames = ["mcp__linear__list_issues"];
 
     const created = registerHoistedTools(
@@ -105,7 +114,7 @@ describe("registerHoistedTools", () => {
   });
 
   it("refreshes existing hoisted names for selectors registered in a prior session", () => {
-    const definitions: Array<{ name: string; parameters?: unknown }> = [
+    const definitions: HoistedDefinitionRecord[] = [
       { name: "mcp__alpha__lookup", parameters: { type: "string" } },
     ];
     const registeredSelectors = new Map([
@@ -133,10 +142,70 @@ describe("registerHoistedTools", () => {
         type: "object",
         additionalProperties: true,
         description: "Arguments object for 'alpha.lookup'.",
+        properties: {
+          timeoutMs: {
+            type: "integer",
+          },
+        },
       },
     });
   });
+
+  it("exposes timeoutMs and removes it from forwarded MCP args", async () => {
+    const definitions: HoistedDefinitionRecord[] = [];
+    const callTool = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "done" }],
+    });
+
+    registerHoistedTools(
+      createPiStub(definitions),
+      async () =>
+        ({
+          listServers: () => ["alpha"],
+          callTool,
+        }) as never,
+      new CatalogStore(),
+      [
+        demoTool("alpha", "lookup", {
+          type: "object",
+          properties: {
+            slug: { type: "string" },
+          },
+          required: ["slug"],
+        }),
+      ],
+      (override) => override ?? 30_000,
+      new Map<string, string>(),
+      new Set<string>(),
+    );
+
+    expect(definitions).toHaveLength(1);
+    expect(definitions[0]?.parameters).toMatchObject({
+      type: "object",
+      properties: {
+        slug: { type: "string" },
+        timeoutMs: { type: "integer" },
+      },
+      required: ["slug"],
+    });
+
+    await definitions[0]?.execute?.("call-1", {
+      slug: "abc",
+      timeoutMs: 45_000,
+    });
+
+    expect(callTool).toHaveBeenCalledWith("alpha", "lookup", {
+      args: { slug: "abc" },
+      timeoutMs: 45_000,
+    });
+  });
 });
+
+type HoistedDefinitionRecord = {
+  execute?: (toolCallId: string, rawParams: unknown) => Promise<unknown>;
+  name: string;
+  parameters?: unknown;
+};
 
 function demoTool(
   server: string,
@@ -153,7 +222,7 @@ function demoTool(
 }
 
 function createPiStub(
-  definitions: Array<{ name: string; parameters?: unknown }>,
+  definitions: HoistedDefinitionRecord[],
   existingToolNames: string[] = [],
 ) {
   return {
@@ -164,18 +233,15 @@ function createPiStub(
       ].map((name) => ({ name, description: name }));
     },
     registerTool(definition: unknown) {
-      const { name, parameters } = definition as {
-        name: string;
-        parameters?: unknown;
-      };
+      const { execute, name, parameters } = definition as HoistedDefinitionRecord;
       const existingIndex = definitions.findIndex(
         (definition) => definition.name === name,
       );
       if (existingIndex >= 0) {
-        definitions[existingIndex] = { name, parameters };
+        definitions[existingIndex] = { execute, name, parameters };
         return;
       }
-      definitions.push({ name, parameters });
+      definitions.push({ execute, name, parameters });
     },
   } as never;
 }
