@@ -33,7 +33,10 @@ describe("createMcporterController", () => {
       await controller.shutdown();
 
       resolveRuntime?.(runtime);
-      await expect(warmupPromise).resolves.toEqual({ warnings: [] });
+      await expect(warmupPromise).resolves.toEqual({
+        notices: [],
+        warnings: [],
+      });
       expect(runtime.close).toHaveBeenCalledTimes(1);
     } finally {
       if (previousHome === undefined) {
@@ -83,7 +86,10 @@ describe("createMcporterController", () => {
         },
       ]);
 
-      await expect(warmupPromise).resolves.toEqual({ warnings: [] });
+      await expect(warmupPromise).resolves.toEqual({
+        notices: [],
+        warnings: [],
+      });
       expect(activeTools).toEqual(["mcporter", "bash"]);
       expect(pi.registeredToolNames).toEqual([]);
     } finally {
