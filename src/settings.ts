@@ -17,8 +17,14 @@ export type McporterSettings = {
   timeoutMs: number;
 };
 
+export type ResolvedMcporterConfig = McporterSettings & {
+  runtimeConfigPath?: string;
+  settingsPath: string;
+};
+
 type SettingsLoaderOptions = {
   homeDirectory?: string;
+  env?: NodeJS.ProcessEnv;
   readFileFn?: (path: string, encoding: "utf8") => Promise<string>;
 };
 
@@ -72,6 +78,42 @@ export async function loadMcporterSettings(
     }
     throw new Error(`Failed to load ${settingsPath}: ${toErrorMessage(error)}`);
   }
+}
+
+export async function loadResolvedMcporterConfig(
+  options: SettingsLoaderOptions = {},
+): Promise<ResolvedMcporterConfig> {
+  const settings = await loadMcporterSettings(options);
+  return resolveMcporterConfig(settings, {
+    env: options.env,
+    homeDirectory: options.homeDirectory,
+  });
+}
+
+export function resolveMcporterConfig(
+  settings: McporterSettings,
+  options: {
+    env?: NodeJS.ProcessEnv;
+    homeDirectory?: string;
+  } = {},
+): ResolvedMcporterConfig {
+  return {
+    ...settings,
+    runtimeConfigPath: resolveRuntimeConfigPath(settings, options.env),
+    settingsPath: resolveMcporterSettingsPath(options.homeDirectory),
+  };
+}
+
+export function resolveRuntimeConfigPath(
+  settings: Pick<McporterSettings, "configPath">,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const envPath = normalizeConfigPath(env.MCPORTER_CONFIG);
+  if (envPath) {
+    return envPath;
+  }
+
+  return settings.configPath;
 }
 
 function normalizeConfigPath(value: unknown): string | undefined {

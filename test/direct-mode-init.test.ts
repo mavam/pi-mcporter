@@ -110,6 +110,7 @@ describe("direct mode extension initialization", () => {
     const settingsPath = join(settingsDirectory, "mcporter.json");
     const previousHome = process.env.HOME;
     const registeredTools = ["mcp__alpha__list_items"];
+    let beforeAgentStart: (() => Promise<void>) | undefined;
 
     await mkdir(settingsDirectory, { recursive: true });
     await writeFile(settingsPath, JSON.stringify({ mode: "direct" }), "utf8");
@@ -119,7 +120,11 @@ describe("direct mode extension initialization", () => {
       const { default: mcporterExtension } = await import("../src/index.ts");
 
       await mcporterExtension({
-        on() {},
+        on(event: string, handler: unknown) {
+          if (event === "before_agent_start") {
+            beforeAgentStart = handler as () => Promise<void>;
+          }
+        },
         registerCommand() {},
         getAllTools() {
           return registeredTools.map((name) => ({ name, description: name }));
@@ -135,6 +140,8 @@ describe("direct mode extension initialization", () => {
         },
         setActiveTools() {},
       } as never);
+
+      await beforeAgentStart?.();
 
       expect(registeredTools).toEqual([
         "mcp__alpha__list_items",
@@ -504,7 +511,7 @@ describe("direct mode extension initialization", () => {
       } as never);
 
       expect(registeredTools).toEqual(["mcporter"]);
-      expect(attempts).toBe(1);
+      expect(attempts).toBe(0);
       expect(beforeAgentStart).toBeTypeOf("function");
 
       const outcome = await Promise.race([
@@ -515,6 +522,8 @@ describe("direct mode extension initialization", () => {
       ]);
 
       expect(outcome).toBe("resolved");
+      expect(attempts).toBe(1);
+      await beforeAgentStart?.();
       expect(attempts).toBe(1);
       expect(registeredTools).toEqual(["mcporter"]);
       expect(activeTools).not.toContain("mcp__alpha__list_items");
@@ -535,25 +544,11 @@ describe("direct mode extension initialization", () => {
     }
   });
 
-  it("does not block extension load when direct preload times out", async () => {
+  it("does not start runtime or preload during extension load", async () => {
     vi.resetModules();
 
-    const runtime = createRuntimeStub(
-      async () => await new Promise<ServerToolInfo[]>(() => {}),
-      ["alpha"],
-    );
-    vi.doMock("mcporter", () => ({
-      createRuntime: vi.fn().mockResolvedValue(runtime),
-    }));
-    vi.doMock("../src/constants.ts", async () => {
-      const actual = await vi.importActual<
-        typeof import("../src/constants.ts")
-      >("../src/constants.ts");
-      return {
-        ...actual,
-        DEFAULT_CATALOG_LIST_TIMEOUT_MS: 25,
-      };
-    });
+    const createRuntime = vi.fn();
+    vi.doMock("mcporter", () => ({ createRuntime }));
 
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
     const settingsDirectory = join(homeDirectory, ".pi", "agent");
@@ -570,31 +565,34 @@ describe("direct mode extension initialization", () => {
       const { default: mcporterExtension } = await import("../src/index.ts");
 
       const outcome = await Promise.race([
-        mcporterExtension({
-          on() {},
-          registerCommand() {},
-          getAllTools() {
-            return registeredTools.map((name) => ({ name, description: name }));
-          },
-          getActiveTools() {
-            return [...activeTools];
-          },
-          registerTool(definition: unknown) {
-            upsertRegisteredTool(
-              registeredTools,
-              (definition as { name: string }).name,
-            );
-          },
-          setActiveTools(toolNames: string[]) {
-            activeTools = [...toolNames];
-          },
-        } as never).then(() => "resolved"),
+        Promise.resolve(
+          mcporterExtension({
+            on() {},
+            registerCommand() {},
+            getAllTools() {
+              return registeredTools.map((name) => ({ name, description: name }));
+            },
+            getActiveTools() {
+              return [...activeTools];
+            },
+            registerTool(definition: unknown) {
+              upsertRegisteredTool(
+                registeredTools,
+                (definition as { name: string }).name,
+              );
+            },
+            setActiveTools(toolNames: string[]) {
+              activeTools = [...toolNames];
+            },
+          } as never),
+        ).then(() => "resolved"),
         new Promise<"timed_out">((resolve) => {
           setTimeout(() => resolve("timed_out"), 250);
         }),
       ]);
 
       expect(outcome).toBe("resolved");
+      expect(createRuntime).not.toHaveBeenCalled();
       expect(registeredTools).toEqual(["mcporter"]);
       expect(activeTools).toEqual(
         expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
@@ -607,7 +605,173 @@ describe("direct mode extension initialization", () => {
         process.env.HOME = previousHome;
       }
 
-      vi.doUnmock("../src/constants.ts");
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves before_agent_start when settings are malformed and fails on tool use", async () => {
+    vi.resetModules();
+
+    let beforeAgentStart: (() => Promise<void>) | undefined;
+    let mcporterTool:
+      | {
+          execute: (
+            toolCallId: string,
+            rawParams: unknown,
+            signal?: AbortSignal,
+          ) => Promise<unknown>;
+        }
+      | undefined;
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+    let activeTools = ["mcporter", "bash", "read", "edit"];
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(settingsPath, '{"mode":"direct"', "utf8");
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      await mcporterExtension({
+        on(event: string, handler: unknown) {
+          if (event === "before_agent_start") {
+            beforeAgentStart = handler as () => Promise<void>;
+          }
+        },
+        registerCommand() {},
+        getAllTools() {
+          return activeTools.map((name) => ({ name, description: name }));
+        },
+        getActiveTools() {
+          return [...activeTools];
+        },
+        registerTool(definition: unknown) {
+          if ((definition as { name: string }).name === "mcporter") {
+            mcporterTool = definition as typeof mcporterTool;
+          }
+        },
+        setActiveTools(toolNames: string[]) {
+          activeTools = [...toolNames];
+        },
+      } as never);
+
+      expect(beforeAgentStart).toBeTypeOf("function");
+      expect(mcporterTool).toBeDefined();
+      await expect(beforeAgentStart?.()).resolves.toBeUndefined();
+      await expect(
+        mcporterTool!.execute("call-1", {
+          action: "search",
+          query: "linear issues",
+        }),
+      ).rejects.toThrow(`Failed to load ${settingsPath}:`);
+      expect(activeTools).toEqual(
+        expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
+      );
+      expect(activeTools).not.toContain("mcp__alpha__list_items");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves before_agent_start when runtime creation fails and fails on tool use", async () => {
+    vi.resetModules();
+
+    let beforeAgentStart: (() => Promise<void>) | undefined;
+    let mcporterTool:
+      | {
+          execute: (
+            toolCallId: string,
+            rawParams: unknown,
+            signal?: AbortSignal,
+          ) => Promise<unknown>;
+        }
+      | undefined;
+    const createRuntime = vi
+      .fn()
+      .mockRejectedValue(new Error("missing mcporter config"));
+    vi.doMock("mcporter", () => ({ createRuntime }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+    let activeTools = ["mcporter", "bash", "read", "edit"];
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        mode: "direct",
+        configPath: "/missing/mcporter.json",
+      }),
+      "utf8",
+    );
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+
+      await mcporterExtension({
+        on(event: string, handler: unknown) {
+          if (event === "before_agent_start") {
+            beforeAgentStart = handler as () => Promise<void>;
+          }
+        },
+        registerCommand() {},
+        getAllTools() {
+          return activeTools.map((name) => ({ name, description: name }));
+        },
+        getActiveTools() {
+          return [...activeTools];
+        },
+        registerTool(definition: unknown) {
+          if ((definition as { name: string }).name === "mcporter") {
+            mcporterTool = definition as typeof mcporterTool;
+          }
+        },
+        setActiveTools(toolNames: string[]) {
+          activeTools = [...toolNames];
+        },
+      } as never);
+
+      expect(beforeAgentStart).toBeTypeOf("function");
+      expect(mcporterTool).toBeDefined();
+      await expect(beforeAgentStart?.()).resolves.toBeUndefined();
+      expect(createRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          configPath: "/missing/mcporter.json",
+        }),
+      );
+      await expect(
+        mcporterTool!.execute("call-2", {
+          action: "search",
+          query: "linear issues",
+        }),
+      ).rejects.toThrow("missing mcporter config");
+      expect(activeTools).toEqual(
+        expect.arrayContaining(["mcporter", "bash", "read", "edit"]),
+      );
+      expect(activeTools).not.toContain("mcp__alpha__list_items");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
       vi.doUnmock("mcporter");
       vi.resetModules();
       await rm(homeDirectory, { recursive: true, force: true });
@@ -619,6 +783,7 @@ describe("direct mode extension initialization", () => {
 
     const runtime = createRuntimeStub(async () => [], []);
     const createRuntime = vi.fn().mockResolvedValue(runtime);
+    let beforeAgentStart: (() => Promise<void>) | undefined;
     vi.doMock("mcporter", () => ({ createRuntime }));
 
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
@@ -643,7 +808,11 @@ describe("direct mode extension initialization", () => {
       const { default: mcporterExtension } = await import("../src/index.ts");
 
       await mcporterExtension({
-        on() {},
+        on(event: string, handler: unknown) {
+          if (event === "before_agent_start") {
+            beforeAgentStart = handler as () => Promise<void>;
+          }
+        },
         registerCommand() {},
         getAllTools() {
           return [];
@@ -654,6 +823,8 @@ describe("direct mode extension initialization", () => {
         registerTool() {},
         setActiveTools() {},
       } as never);
+
+      await beforeAgentStart?.();
 
       expect(createRuntime).toHaveBeenCalledWith(
         expect.objectContaining({

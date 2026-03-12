@@ -12,35 +12,23 @@ import {
   type Component,
   visibleWidth,
 } from "@mariozechner/pi-tui";
-import { createRuntime, type Runtime } from "mcporter";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
 import { handleSearchAction } from "./actions/search.js";
+import { createMcporterController } from "./bootstrap.js";
 import { formatCallArgsPreview } from "./call-args-preview.js";
-import { CatalogStore } from "./catalog-store.js";
-import { cleanSingleLine, textContent, toErrorMessage } from "./helpers.js";
-import { registerHoistedTools } from "./hoisted-tools.js";
+import { cleanSingleLine, textContent } from "./helpers.js";
 import {
   clampLimit,
   parseCallArgs,
   parseSelector,
   resolveCallTimeoutFromInputs,
 } from "./inputs.js";
-import {
-  resolveMcporterMode,
-  shouldHoistTools,
-  shouldPreloadCatalog,
-} from "./mode.js";
+import { resolveMcporterMode } from "./mode.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
-import { preloadCatalogForMode } from "./startup.js";
-import {
-  getDefaultMcporterSettings,
-  loadMcporterSettings,
-  type McporterSettings,
-} from "./settings.js";
 import { withPromptMetadata } from "./tool-registration.js";
-import type { CatalogTool, ToolDetails } from "./types.js";
+import type { ToolDetails } from "./types.js";
 
 const PACKAGE_VERSION: string = await readFile(
   new URL("../package.json", import.meta.url),
@@ -49,21 +37,10 @@ const PACKAGE_VERSION: string = await readFile(
   .then((raw) => (JSON.parse(raw) as { version: string }).version)
   .catch(() => "0.0.0-dev");
 
-export default async function mcporterExtension(pi: ExtensionAPI) {
-  let runtime: Runtime | undefined;
-  let runtimePromise: Promise<Runtime> | undefined;
-  let preloadPromise: Promise<void> | undefined;
-  let preloadWarnings: string[] = [];
-  let preloadError: string | undefined;
-  let settings = getDefaultMcporterSettings();
-  let settingsPromise: Promise<McporterSettings> | undefined;
-  const catalogStore = new CatalogStore();
-  const registeredHoistedSelectors = new Map<string, string>();
-  const registeredHoistedNames = new Set<string>();
-  const registeredToolNames = new Set<string>(["mcporter"]);
-  let activeHoistedToolNames = new Set<string>();
-  let desiredHoistedToolNames = new Set<string>();
-  let pendingHoistedTools: CatalogTool[] = [];
+export default function mcporterExtension(pi: ExtensionAPI) {
+  const controller = createMcporterController(pi, {
+    packageVersion: PACKAGE_VERSION,
+  });
 
   pi.registerTool(
     withPromptMetadata(
@@ -78,7 +55,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
 
         async execute(_toolCallId, rawParams, signal, onUpdate, _ctx) {
           const params = rawParams as McporterParams;
-          const activeRuntime = await ensureRuntime();
+          const activeRuntime = await controller.ensureRuntime();
           if (signal?.aborted) {
             throw new Error("Cancelled.");
           }
@@ -93,7 +70,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
                 activeRuntime,
                 params,
                 signal,
-                catalogStore,
+                controller.catalogStore,
               );
             }
             case "describe": {
@@ -105,7 +82,7 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
                 activeRuntime,
                 params,
                 signal,
-                catalogStore,
+                controller.catalogStore,
               );
             }
             case "call": {
@@ -117,8 +94,8 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
                 activeRuntime,
                 params,
                 signal,
-                catalogStore,
-                resolveCallTimeout,
+                controller.catalogStore,
+                controller.resolveCallTimeout,
               );
             }
             default:
@@ -179,236 +156,24 @@ export default async function mcporterExtension(pi: ExtensionAPI) {
   );
 
   pi.on("session_start", async (_event, ctx) => {
-    try {
-      const activeRuntime = await ensureRuntime();
-      await ensurePreload(activeRuntime);
-      registerPendingHoistedTools();
-      syncHoistedToolActivation(desiredHoistedToolNames);
-    } catch (error) {
-      preloadError = toErrorMessage(error);
-    }
+    const status = await controller.warmup();
 
-    notifyStartupStatus((message) => {
+    for (const message of controller.getStartupMessages(status)) {
       if (ctx.hasUI) {
         ctx.ui.notify(message, "warning");
       } else {
         emitStderrNotice(message);
       }
-    });
+    }
   });
 
   pi.on("before_agent_start", async () => {
-    const activeRuntime = await ensureRuntime();
-    await ensurePreload(activeRuntime);
-    registerPendingHoistedTools();
-    syncHoistedToolActivation(desiredHoistedToolNames);
+    await controller.warmup();
   });
 
   pi.on("session_shutdown", async () => {
-    const activeRuntime = runtime;
-    runtime = undefined;
-    runtimePromise = undefined;
-    preloadPromise = undefined;
-    preloadWarnings = [];
-    preloadError = undefined;
-    settings = getDefaultMcporterSettings();
-    settingsPromise = undefined;
-    catalogStore.clear();
-    pendingHoistedTools = [];
-    desiredHoistedToolNames = new Set();
-    syncHoistedToolActivation([]);
-
-    if (activeRuntime) {
-      await activeRuntime.close().catch(() => {});
-    }
+    await controller.shutdown();
   });
-
-  function resolveMode() {
-    return settings.mode;
-  }
-
-  function ensurePreload(activeRuntime: Runtime): Promise<void> | undefined {
-    const mode = resolveMode();
-    if (!shouldPreloadCatalog(mode, settings.serverModes)) {
-      preloadWarnings = [];
-      preloadError = undefined;
-      return undefined;
-    }
-
-    if (!preloadPromise) {
-      preloadPromise = preloadCatalogForMode(
-        activeRuntime,
-        catalogStore,
-        mode,
-        settings.serverModes,
-      )
-        .then((summary) => {
-          preloadWarnings = summary.warnings;
-          preloadError = undefined;
-          pendingHoistedTools = summary.hoistedTools;
-
-          registerPendingHoistedTools();
-        })
-        .catch((error) => {
-          preloadPromise = undefined;
-          preloadWarnings = [];
-          preloadError = toErrorMessage(error);
-          throw error;
-        });
-    }
-
-    return preloadPromise;
-  }
-
-  function syncHoistedToolActivation(nextToolNames: Iterable<string>): void {
-    const desiredToolNames = new Set(nextToolNames);
-    const activeToolNames = new Set(pi.getActiveTools());
-
-    for (const toolName of activeHoistedToolNames) {
-      if (!desiredToolNames.has(toolName)) {
-        activeToolNames.delete(toolName);
-      }
-    }
-    for (const toolName of desiredToolNames) {
-      activeToolNames.add(toolName);
-    }
-
-    activeHoistedToolNames = desiredToolNames;
-    pi.setActiveTools([...activeToolNames]);
-  }
-
-  function notifyStartupStatus(notify: (message: string) => void): void {
-    if (preloadError) {
-      notify(`mcporter extension: ${preloadError}`);
-    }
-    if (preloadWarnings.length > 0) {
-      notify(
-        `mcporter extension: metadata unavailable for ${preloadWarnings.length} server(s).`,
-      );
-    }
-  }
-
-  async function ensureSettings(): Promise<McporterSettings> {
-    if (settingsPromise) {
-      return await settingsPromise;
-    }
-
-    settingsPromise = loadMcporterSettings()
-      .then((loaded) => {
-        settings = loaded;
-        return loaded;
-      })
-      .catch((error) => {
-        settingsPromise = undefined;
-        throw error;
-      });
-
-    return await settingsPromise;
-  }
-
-  function registerPendingHoistedTools(): void {
-    if (pendingHoistedTools.length === 0) {
-      desiredHoistedToolNames = new Set();
-      return;
-    }
-
-    const { occupiedToolNames, registryAvailable } = getOccupiedToolNames();
-    const hasUnnamedHoistedTools = pendingHoistedTools.some(
-      (tool) => !registeredHoistedSelectors.has(tool.selector),
-    );
-
-    if (!registryAvailable && hasUnnamedHoistedTools) {
-      desiredHoistedToolNames = new Set(
-        pendingHoistedTools.flatMap((tool) => {
-          const name = registeredHoistedSelectors.get(tool.selector);
-          return name ? [name] : [];
-        }),
-      );
-      return;
-    }
-
-    const hoistedToolNames = registerHoistedTools(
-      pi,
-      ensureRuntime,
-      catalogStore,
-      pendingHoistedTools,
-      resolveCallTimeout,
-      registeredHoistedSelectors,
-      registeredHoistedNames,
-      occupiedToolNames,
-    );
-    desiredHoistedToolNames = new Set(hoistedToolNames);
-    for (const toolName of hoistedToolNames) {
-      registeredToolNames.add(toolName);
-    }
-  }
-
-  function getOccupiedToolNames(): {
-    occupiedToolNames: Set<string>;
-    registryAvailable: boolean;
-  } {
-    const occupiedToolNames = new Set(registeredToolNames);
-
-    try {
-      for (const tool of pi.getAllTools()) {
-        occupiedToolNames.add(tool.name);
-      }
-      return { occupiedToolNames, registryAvailable: true };
-    } catch {
-      // Some tests and older runtimes may not expose the registry this early.
-      return { occupiedToolNames, registryAvailable: false };
-    }
-  }
-
-  function resolveConfiguredPath(
-    loadedSettings: McporterSettings,
-  ): string | undefined {
-    const env = process.env.MCPORTER_CONFIG;
-    if (typeof env === "string" && env.trim().length > 0) {
-      return env.trim();
-    }
-
-    return loadedSettings.configPath;
-  }
-
-  async function ensureRuntime(): Promise<Runtime> {
-    if (runtime) {
-      return runtime;
-    }
-    if (!runtimePromise) {
-      runtimePromise = ensureSettings()
-        .then((loadedSettings) => {
-          const configPath = resolveConfiguredPath(loadedSettings);
-          return createRuntime({
-            ...(configPath ? { configPath } : {}),
-            clientInfo: { name: "pi-mcporter", version: PACKAGE_VERSION },
-          });
-        })
-        .then((created) => {
-          runtime = created;
-          return created;
-        })
-        .catch((error) => {
-          runtimePromise = undefined;
-          throw error;
-        });
-    }
-    return runtimePromise;
-  }
-
-  function resolveCallTimeout(override?: number): number {
-    return resolveCallTimeoutFromInputs(override, String(settings.timeoutMs));
-  }
-
-  try {
-    await ensureSettings();
-    if (shouldPreloadCatalog(settings.mode, settings.serverModes)) {
-      const activeRuntime = await ensureRuntime();
-      await ensurePreload(activeRuntime);
-    }
-  } catch (error) {
-    preloadError = toErrorMessage(error);
-  }
 }
 
 function emitStderrNotice(message: string): void {

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   getDefaultMcporterSettings,
+  loadResolvedMcporterConfig,
   loadMcporterSettings,
   normalizeMcporterSettings,
+  resolveMcporterConfig,
   resolveMcporterSettingsPath,
+  resolveRuntimeConfigPath,
 } from "../src/settings.ts";
 
 describe("mcporter settings", () => {
@@ -24,6 +27,27 @@ describe("mcporter settings", () => {
     });
 
     expect(settings).toEqual(getDefaultMcporterSettings());
+  });
+
+  it("resolves env config path ahead of settings configPath", () => {
+    expect(
+      resolveRuntimeConfigPath(
+        {
+          ...getDefaultMcporterSettings(),
+          configPath: "/settings/mcporter.json",
+        },
+        { MCPORTER_CONFIG: " /env/mcporter.json " },
+      ),
+    ).toBe("/env/mcporter.json");
+  });
+
+  it("uses settings configPath when MCPORTER_CONFIG is unset", () => {
+    expect(
+      resolveMcporterConfig({
+        ...getDefaultMcporterSettings(),
+        configPath: "/settings/mcporter.json",
+      }).runtimeConfigPath,
+    ).toBe("/settings/mcporter.json");
   });
 
   it("normalizes supported settings fields", () => {
@@ -118,5 +142,28 @@ describe("mcporter settings", () => {
     ).rejects.toThrow(
       "Failed to load /home/tester/.pi/agent/mcporter.json: Expected a top-level JSON object.",
     );
+  });
+
+  it("loads resolved config with effective runtime config path", async () => {
+    const config = await loadResolvedMcporterConfig({
+      homeDirectory: "/home/tester",
+      env: { MCPORTER_CONFIG: "/env/mcporter.json" },
+      async readFileFn() {
+        return JSON.stringify({
+          configPath: "/settings/mcporter.json",
+          timeoutMs: 45_000,
+          mode: "direct",
+        });
+      },
+    });
+
+    expect(config).toEqual({
+      configPath: "/settings/mcporter.json",
+      runtimeConfigPath: "/env/mcporter.json",
+      settingsPath: "/home/tester/.pi/agent/mcporter.json",
+      timeoutMs: 45_000,
+      mode: "direct",
+      serverModes: {},
+    });
   });
 });
