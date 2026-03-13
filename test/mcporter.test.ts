@@ -139,6 +139,32 @@ describe("mcporter renderer", () => {
     expect(rendered).toContain("\n  team=PI limit=10 state=Todo");
   });
 
+  it("redacts sensitive call args in the call header", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "demo.login",
+          args: {
+            team: "PI",
+            apiKey: "top-secret",
+            password: "hunter2",
+          },
+        },
+        createTheme(),
+      ),
+      120,
+    );
+
+    expect(rendered).toContain("team=PI");
+    expect(rendered).toContain("apiKey=[redacted]");
+    expect(rendered).toContain("password=[redacted]");
+    expect(rendered).not.toContain("top-secret");
+    expect(rendered).not.toContain("hunter2");
+  });
+
   it("sizes call arg previews to the available width", () => {
     const { tool } = createExtensionHarness();
 
@@ -305,6 +331,22 @@ describe("call args preview formatting", () => {
         40,
       ),
     ).toBe('items=[1,2] nested={"ok":true}');
+  });
+
+  it("redacts sensitive values in nested argsJson previews", () => {
+    expect(
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "headers": {\n    "Authorization": "Bearer top-secret"\n  },\n  "sessionToken": "abc123",\n  "query": "status:open"\n}',
+        },
+        120,
+      ),
+    ).toBe(
+      'headers={"Authorization":"[redacted]"} sessionToken=[redacted] query=status:open',
+    );
   });
 
   it("truncates long args previews", () => {

@@ -98,6 +98,7 @@ Tool output follows pi's native expand/collapse behavior:
 
 - Collapsed view shows a compact summary
 - Expanded view shows the full rendered output
+- Collapsed call headers may preview tool arguments, but sensitive fields such as tokens, passwords, API keys, authorization headers, and cookies are redacted
 - Use pi's `expandTools` keybinding (default `Ctrl+O`) to toggle expansion
 
 ## 🧯 Troubleshooting

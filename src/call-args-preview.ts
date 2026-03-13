@@ -1,6 +1,23 @@
 import { parseCallArgs } from "./inputs.js";
 import type { McporterParams } from "./parameters.js";
 
+const REDACTED_PREVIEW_VALUE = "[redacted]";
+const SENSITIVE_PREVIEW_KEY_PARTS = [
+  "apikey",
+  "authorization",
+  "bearer",
+  "cookie",
+  "credential",
+  "privatekey",
+  "password",
+  "passwd",
+  "pwd",
+  "refreshtoken",
+  "secret",
+  "sessionid",
+  "token",
+] as const;
+
 function isBarePreviewToken(value: string): boolean {
   return /^[A-Za-z0-9._:/@-]+$/.test(value);
 }
@@ -43,6 +60,34 @@ function stringifyPreviewJson(value: unknown): string {
   }
 }
 
+function normalizePreviewKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isSensitivePreviewKey(key: string): boolean {
+  const normalized = normalizePreviewKey(key);
+  return SENSITIVE_PREVIEW_KEY_PARTS.some((part) => normalized.includes(part));
+}
+
+function redactPreviewValue(value: unknown, key?: string): unknown {
+  if (typeof key === "string" && isSensitivePreviewKey(key)) {
+    return REDACTED_PREVIEW_VALUE;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactPreviewValue(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).map(
+    ([entryKey, entryValue]) => [entryKey, redactPreviewValue(entryValue, entryKey)],
+  );
+  return Object.fromEntries(entries);
+}
+
 function formatPreviewString(value: string, maxChars: number): string {
   if (value.length > 0 && isBarePreviewToken(value)) {
     return truncateWithEllipsis(value, maxChars);
@@ -57,7 +102,15 @@ function formatPreviewKey(key: string, maxChars: number): string {
   return formatJsonValuePreview(key, maxChars);
 }
 
-function formatPreviewValue(value: unknown, maxChars: number): string {
+function formatPreviewValue(
+  key: string,
+  value: unknown,
+  maxChars: number,
+): string {
+  if (isSensitivePreviewKey(key)) {
+    return REDACTED_PREVIEW_VALUE;
+  }
+
   if (value === null) {
     return "null";
   }
@@ -72,7 +125,7 @@ function formatPreviewValue(value: unknown, maxChars: number): string {
     case "bigint":
       return "null";
     case "object":
-      return formatJsonValuePreview(value, maxChars);
+      return formatJsonValuePreview(redactPreviewValue(value), maxChars);
     default:
       return "null";
   }
@@ -94,7 +147,7 @@ export function formatArgsObjectKeyValuePreview(
   const preview = entries
     .map(
       ([key, entryValue]) =>
-        `${formatPreviewKey(key, maxChars)}=${formatPreviewValue(entryValue, maxChars)}`,
+        `${formatPreviewKey(key, maxChars)}=${formatPreviewValue(key, entryValue, maxChars)}`,
     )
     .join(" ");
 
