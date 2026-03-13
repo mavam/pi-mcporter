@@ -1,5 +1,5 @@
 ---
-title: Configurable MCP tool visibility modes
+title: Configurable MCP tool loading modes
 type: feature
 authors:
   - mavam
@@ -8,8 +8,8 @@ pr: 3
 created: 2026-03-10T08:22:08.798166Z
 ---
 
-Pi MCPorter now lets users choose between fully lazy operation and prompt-oriented catalog preloading while keeping all MCP access behind the stable `mcporter` interface.
+Pi MCPorter now lets you choose between lazy loading and catalog preloading for MCP tools, while still routing all MCP access through the stable `mcporter` interface. In preload mode, pi warms MCP tool metadata before the agent starts so it can more often skip discovery and call the right tool directly.
 
-Malformed settings, missing runtime config, slow servers, and unavailable MCP servers no longer abort agent startup. Prompt preloading retries after transient failures and refreshes cached catalog metadata after TTL expiry.
+Malformed settings, missing configuration, slow servers, and unavailable MCP servers no longer abort agent startup. Preloading now retries after transient failures and refreshes cached catalog data after it expires.
 
-Configuration is now sourced from `~/.pi/agent/mcporter.json`, `MCPORTER_CONFIG`, and per-call `timeoutMs`. The legacy `--mcporter-config` and `--mcporter-timeout-ms` extension flags are no longer supported.
+Configuration now comes from `~/.pi/agent/mcporter.json`, `MCPORTER_CONFIG`, and per-call `timeoutMs`. The legacy `--mcporter-config` and `--mcporter-timeout-ms` extension flags are no longer supported.
