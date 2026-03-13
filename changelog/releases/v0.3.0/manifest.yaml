@@ -1,0 +1,7 @@
+created: 2026-03-13
+title: Configurable MCP tool loading modes
+intro: >-
+  This release adds configurable MCP tool loading modes for Pi MCPorter while keeping
+  the stable mcporter proxy workflow. You can choose lazy loading or preload mode to
+  warm MCP metadata before agent startup, and startup now recovers cleanly from
+  malformed settings, missing configuration, slow servers, and temporary MCP outages.
