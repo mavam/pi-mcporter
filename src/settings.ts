@@ -75,11 +75,27 @@ export async function loadMcporterSettings(
 export async function loadResolvedMcporterConfig(
   options: SettingsLoaderOptions = {},
 ): Promise<ResolvedMcporterConfig> {
-  const settings = await loadMcporterSettings(options);
-  return resolveMcporterConfig(settings, {
-    env: options.env,
-    homeDirectory: options.homeDirectory,
-  });
+  try {
+    const settings = await loadMcporterSettings(options);
+    return resolveMcporterConfig(settings, {
+      env: options.env,
+      homeDirectory: options.homeDirectory,
+    });
+  } catch (error) {
+    const runtimeConfigPath = resolveRuntimeConfigPath(
+      getDefaultMcporterSettings(),
+      options.env,
+    );
+    if (!runtimeConfigPath) {
+      throw error;
+    }
+
+    return {
+      ...getDefaultMcporterSettings(),
+      runtimeConfigPath,
+      settingsPath: resolveMcporterSettingsPath(options.homeDirectory),
+    };
+  }
 }
 
 export function resolveMcporterConfig(

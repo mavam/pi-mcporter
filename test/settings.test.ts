@@ -112,4 +112,21 @@ describe("mcporter settings", () => {
       mode: "preload",
     });
   });
+
+  it("uses MCPORTER_CONFIG when the settings file is malformed", async () => {
+    const config = await loadResolvedMcporterConfig({
+      homeDirectory: "/home/tester",
+      env: { MCPORTER_CONFIG: "/env/mcporter.json" },
+      async readFileFn() {
+        return '{"mode":"preload"';
+      },
+    });
+
+    expect(config).toEqual({
+      runtimeConfigPath: "/env/mcporter.json",
+      settingsPath: "/home/tester/.pi/agent/mcporter.json",
+      timeoutMs: 30_000,
+      mode: "lazy",
+    });
+  });
 });

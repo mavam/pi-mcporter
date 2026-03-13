@@ -144,6 +144,10 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event) => {
+    if (!isToolActive(pi, "mcporter")) {
+      return;
+    }
+
     const systemPromptAppend = await controller.buildSystemPromptAppend();
     if (systemPromptAppend) {
       return {
@@ -155,6 +159,17 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     await controller.shutdown();
   });
+}
+
+function isToolActive(
+  pi: Pick<ExtensionAPI, "getActiveTools">,
+  toolName: string,
+): boolean {
+  try {
+    return pi.getActiveTools().includes(toolName);
+  } catch {
+    return true;
+  }
 }
 
 function extractTextContent(
