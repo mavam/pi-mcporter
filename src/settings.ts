@@ -4,16 +4,11 @@ import { join } from "node:path";
 import { DEFAULT_CALL_TIMEOUT_MS } from "./constants.js";
 import { isPlainObject, toErrorMessage } from "./helpers.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
-import {
-  parseMcporterMode,
-  resolveMcporterMode,
-  type McporterMode,
-} from "./mode.js";
+import { resolveMcporterMode, type McporterMode } from "./mode.js";
 
 export type McporterSettings = {
   configPath?: string;
   mode: McporterMode;
-  serverModes: Record<string, McporterMode>;
   timeoutMs: number;
 };
 
@@ -31,7 +26,6 @@ type SettingsLoaderOptions = {
 export function getDefaultMcporterSettings(): McporterSettings {
   return {
     mode: "lazy",
-    serverModes: {},
     timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
   };
 }
@@ -52,12 +46,10 @@ export function normalizeMcporterSettings(value: unknown): McporterSettings {
     typeof value.mode === "string"
       ? resolveMcporterMode(value.mode)
       : defaults.mode;
-  const serverModes = normalizeServerModes(value.serverModes);
 
   return {
     configPath,
     mode,
-    serverModes,
     timeoutMs,
   };
 }
@@ -132,30 +124,6 @@ function normalizeTimeoutMs(value: unknown): number {
     return resolveCallTimeoutFromInputs(undefined, value);
   }
   return DEFAULT_CALL_TIMEOUT_MS;
-}
-
-function normalizeServerModes(value: unknown): Record<string, McporterMode> {
-  if (!isPlainObject(value)) {
-    return {};
-  }
-
-  const entries = Object.entries(value)
-    .map(([server, modeValue]) => {
-      const name = server.trim();
-      if (!name || typeof modeValue !== "string") {
-        return undefined;
-      }
-      const mode = parseMcporterMode(modeValue);
-      if (!mode) {
-        return undefined;
-      }
-      return [name, mode] as const;
-    })
-    .filter(
-      (entry): entry is readonly [string, McporterMode] => entry !== undefined,
-    );
-
-  return Object.fromEntries(entries);
 }
 
 function isMissingFileError(

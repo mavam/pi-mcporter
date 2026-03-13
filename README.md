@@ -79,11 +79,7 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
 {
   "configPath": "/absolute/path/to/mcporter.json",
   "timeoutMs": 30000,
-  "mode": "lazy",
-  "serverModes": {
-    "linear": "direct",
-    "slack": "preload"
-  }
+  "mode": "lazy"
 }
 ```
 
@@ -92,9 +88,7 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
 - `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
 - `mode`: optional default MCP tool visibility mode.
   - `lazy`: only the stable `mcporter` proxy tool is visible and MCP metadata loads on demand
-  - `preload`: still only exposes `mcporter`, but preloads MCP tool metadata on startup so the agent can skip unnecessary discovery more often
-  - `direct`: requests first-class pi tools in addition to `mcporter`; when the host cannot scope custom-tool registrations to a session, pi-mcporter falls back to `preload` and emits a startup warning instead
-- `serverModes`: optional per-server overrides for `mode`, keyed by MCP server name.
+  - `preload`: still only exposes `mcporter`, but preloads MCP tool metadata before agent start so the agent can skip unnecessary discovery more often
 
 Legacy extension flags `--mcporter-config` and `--mcporter-timeout-ms` are no longer supported. Use `~/.pi/agent/mcporter.json`, `MCPORTER_CONFIG`, and per-call `timeoutMs` instead.
 

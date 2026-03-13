@@ -3,7 +3,7 @@ import type { Runtime, ServerToolInfo } from "mcporter";
 import { CatalogStore } from "../src/catalog-store.ts";
 import mcporterExtension, { __test__ } from "../src/index.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
-import { preloadCatalogForMode } from "../src/startup.ts";
+import { preloadCatalog } from "../src/startup.ts";
 
 describe("mcporter renderer", () => {
   it("collapses describe output until expanded", () => {
@@ -329,14 +329,8 @@ describe("mode resolution", () => {
     expect(__test__.resolveMcporterMode(undefined)).toBe("lazy");
   });
 
-  it("accepts preload and direct", () => {
+  it("accepts preload", () => {
     expect(__test__.resolveMcporterMode("preload")).toBe("preload");
-    expect(__test__.resolveMcporterMode("DIRECT")).toBe("direct");
-  });
-
-  it("accepts legacy eager and hoist aliases", () => {
-    expect(__test__.resolveMcporterMode("eager")).toBe("preload");
-    expect(__test__.resolveMcporterMode("HOIST")).toBe("direct");
   });
 
   it("falls back to lazy for unknown values", () => {
@@ -345,7 +339,7 @@ describe("mode resolution", () => {
 });
 
 describe("startup preload", () => {
-  it("warms the basic catalog in preload mode", async () => {
+  it("warms the basic catalog", async () => {
     const seenOptions: Array<{ includeSchema?: boolean }> = [];
     const runtime = createRuntimeStub(
       async (server, options) => {
@@ -358,14 +352,9 @@ describe("startup preload", () => {
       ["alpha", "beta"],
     );
 
-    const summary = await preloadCatalogForMode(
-      runtime,
-      new CatalogStore(),
-      "preload",
-    );
+    const summary = await preloadCatalog(runtime, new CatalogStore());
 
     expect(summary.warmedServers).toEqual(["alpha"]);
-    expect(summary.hoistedTools).toEqual([]);
     expect(summary.warnings).toEqual(["beta: offline"]);
     expect(seenOptions).toEqual([
       { includeSchema: false },
@@ -373,39 +362,8 @@ describe("startup preload", () => {
     ]);
   });
 
-  it("loads schemas for direct mode", async () => {
-    const seenOptions: Array<{ includeSchema?: boolean }> = [];
-    const runtime = createRuntimeStub(
-      async (server, options) => {
-        seenOptions.push({ includeSchema: options?.includeSchema });
-        return [
-          demoTool(server, "list_items", {
-            type: "object",
-            properties: { limit: { type: "number" } },
-          }),
-        ];
-      },
-      ["alpha"],
-    );
-
-    const summary = await preloadCatalogForMode(
-      runtime,
-      new CatalogStore(),
-      "direct",
-    );
-
-    expect(summary.warmedServers).toEqual(["alpha"]);
-    expect(summary.hoistedTools.map((tool) => tool.selector)).toEqual([
-      "alpha.list_items",
-    ]);
-    expect(seenOptions).toEqual([{ includeSchema: true }]);
-  });
-
-  it("honors per-server mode overrides", async () => {
-    const seenOptions: Array<{
-      includeSchema?: boolean;
-      server: string;
-    }> = [];
+  it("only performs basic metadata reads", async () => {
+    const seenOptions: Array<{ includeSchema?: boolean; server: string }> = [];
     const runtime = createRuntimeStub(
       async (server, options) => {
         seenOptions.push({
@@ -417,23 +375,13 @@ describe("startup preload", () => {
       ["alpha", "beta", "gamma"],
     );
 
-    const summary = await preloadCatalogForMode(
-      runtime,
-      new CatalogStore(),
-      "lazy",
-      {
-        alpha: "preload",
-        beta: "direct",
-      },
-    );
+    const summary = await preloadCatalog(runtime, new CatalogStore());
 
-    expect(summary.warmedServers).toEqual(["alpha", "beta"]);
-    expect(summary.hoistedTools.map((tool) => tool.selector)).toEqual([
-      "beta.list_items",
-    ]);
+    expect(summary.warmedServers).toEqual(["alpha", "beta", "gamma"]);
     expect(seenOptions).toEqual([
       { server: "alpha", includeSchema: false },
-      { server: "beta", includeSchema: true },
+      { server: "beta", includeSchema: false },
+      { server: "gamma", includeSchema: false },
     ]);
   });
 });

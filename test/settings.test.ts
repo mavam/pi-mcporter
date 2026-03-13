@@ -55,20 +55,12 @@ describe("mcporter settings", () => {
       normalizeMcporterSettings({
         configPath: "  /tmp/mcporter.json  ",
         timeoutMs: 45_000,
-        mode: "DIRECT",
-        serverModes: {
-          linear: "preload",
-          slack: "LAZY",
-        },
+        mode: "PRELOAD",
       }),
     ).toEqual({
       configPath: "/tmp/mcporter.json",
       timeoutMs: 45_000,
-      mode: "direct",
-      serverModes: {
-        linear: "preload",
-        slack: "lazy",
-      },
+      mode: "preload",
     });
   });
 
@@ -78,56 +70,11 @@ describe("mcporter settings", () => {
         configPath: "   ",
         timeoutMs: "wat",
         mode: "surprise",
-        serverModes: {
-          linear: "surprise",
-          "   ": "direct",
-          github: 123,
-        },
       }),
     ).toEqual({
       configPath: undefined,
       timeoutMs: 30_000,
       mode: "lazy",
-      serverModes: {},
-    });
-  });
-
-  it("ignores invalid per-server modes while preserving valid overrides", () => {
-    expect(
-      normalizeMcporterSettings({
-        mode: "direct",
-        serverModes: {
-          linear: "preload",
-          slack: "surprise",
-          github: " lazy ",
-        },
-      }),
-    ).toEqual({
-      configPath: undefined,
-      timeoutMs: 30_000,
-      mode: "direct",
-      serverModes: {
-        linear: "preload",
-        github: "lazy",
-      },
-    });
-  });
-
-  it("accepts legacy eager and hoist aliases", () => {
-    expect(
-      normalizeMcporterSettings({
-        mode: "hoist",
-        serverModes: {
-          linear: "eager",
-        },
-      }),
-    ).toEqual({
-      configPath: undefined,
-      timeoutMs: 30_000,
-      mode: "direct",
-      serverModes: {
-        linear: "preload",
-      },
     });
   });
 
@@ -152,7 +99,7 @@ describe("mcporter settings", () => {
         return JSON.stringify({
           configPath: "/settings/mcporter.json",
           timeoutMs: 45_000,
-          mode: "direct",
+          mode: "preload",
         });
       },
     });
@@ -162,8 +109,7 @@ describe("mcporter settings", () => {
       runtimeConfigPath: "/env/mcporter.json",
       settingsPath: "/home/tester/.pi/agent/mcporter.json",
       timeoutMs: 45_000,
-      mode: "direct",
-      serverModes: {},
+      mode: "preload",
     });
   });
 });

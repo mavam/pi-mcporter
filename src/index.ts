@@ -143,37 +143,18 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on("session_start", async (_event, ctx) => {
-    const status = await controller.warmup();
-
-    for (const message of controller.getStartupMessages(status)) {
-      if (ctx.hasUI) {
-        ctx.ui.notify(message, "warning");
-      } else {
-        emitStderrNotice(message);
-      }
-    }
-  });
-
   pi.on("before_agent_start", async (event) => {
-    if (await controller.shouldWarmupBeforeAgentStart()) {
-      await controller.warmup();
-      const systemPromptAppend = await controller.buildSystemPromptAppend();
-      if (systemPromptAppend) {
-        return {
-          systemPrompt: `${event.systemPrompt}\n\n${systemPromptAppend}`,
-        };
-      }
+    const systemPromptAppend = await controller.buildSystemPromptAppend();
+    if (systemPromptAppend) {
+      return {
+        systemPrompt: `${event.systemPrompt}\n\n${systemPromptAppend}`,
+      };
     }
   });
 
   pi.on("session_shutdown", async () => {
     await controller.shutdown();
   });
-}
-
-function emitStderrNotice(message: string): void {
-  process.stderr.write(`${message}\n`);
 }
 
 function extractTextContent(

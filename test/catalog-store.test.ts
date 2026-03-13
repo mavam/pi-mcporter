@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
 import { CatalogStore } from "../src/catalog-store.ts";
 import { CATALOG_TTL_MS } from "../src/constants.ts";
-import { preloadCatalogForMode } from "../src/startup.ts";
+import { preloadCatalog } from "../src/startup.ts";
 
 describe("CatalogStore preload timeouts", () => {
   it("does not reuse in-flight preload schema requests for interactive reads", async () => {
@@ -140,7 +140,7 @@ describe("CatalogStore preload timeouts", () => {
       ["alpha", "beta"],
     );
 
-    const summary = await preloadCatalogForMode(runtime, store, "preload");
+    const summary = await preloadCatalog(runtime, store);
     expect(summary.warmedServers).toEqual(["alpha"]);
     expect(summary.warnings).toEqual([
       expect.stringContaining("beta: Timed out loading MCP tool catalog"),
