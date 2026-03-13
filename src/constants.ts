@@ -1,4 +1,5 @@
 export const CATALOG_TTL_MS = 5 * 60 * 1000;
+export const DEFAULT_CATALOG_LIST_TIMEOUT_MS = 10_000;
 
 export const DEFAULT_SEARCH_LIMIT = 20;
 export const MAX_SEARCH_LIMIT = 100;

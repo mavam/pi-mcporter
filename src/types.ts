@@ -20,6 +20,7 @@ export interface CatalogSnapshot {
 }
 
 export interface Cached<T> {
+  fetchedAt: number;
   expiresAt: number;
   value: T;
 }

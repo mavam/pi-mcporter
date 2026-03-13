@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { Runtime, ServerToolInfo } from "mcporter";
+import { CatalogStore } from "../src/catalog-store.ts";
 import mcporterExtension, { __test__ } from "../src/index.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
+import { preloadCatalog } from "../src/startup.ts";
 
 describe("mcporter renderer", () => {
   it("collapses describe output until expanded", () => {
@@ -134,6 +137,32 @@ describe("mcporter renderer", () => {
 
     expect(rendered).toContain("mcporter call linear.list_issues");
     expect(rendered).toContain("\n  team=PI limit=10 state=Todo");
+  });
+
+  it("redacts sensitive call args in the call header", () => {
+    const { tool } = createExtensionHarness();
+
+    const rendered = renderComponentText(
+      tool.renderCall(
+        {
+          action: "call",
+          selector: "demo.login",
+          args: {
+            team: "PI",
+            apiKey: "top-secret",
+            password: "hunter2",
+          },
+        },
+        createTheme(),
+      ),
+      120,
+    );
+
+    expect(rendered).toContain("team=PI");
+    expect(rendered).toContain("apiKey=[redacted]");
+    expect(rendered).toContain("password=[redacted]");
+    expect(rendered).not.toContain("top-secret");
+    expect(rendered).not.toContain("hunter2");
   });
 
   it("sizes call arg previews to the available width", () => {
@@ -304,6 +333,22 @@ describe("call args preview formatting", () => {
     ).toBe('items=[1,2] nested={"ok":true}');
   });
 
+  it("redacts sensitive values in nested argsJson previews", () => {
+    expect(
+      __test__.formatCallArgsPreview(
+        {
+          action: "call",
+          selector: "demo.echo",
+          argsJson:
+            '{\n  "headers": {\n    "Authorization": "Bearer top-secret"\n  },\n  "sessionToken": "abc123",\n  "query": "status:open"\n}',
+        },
+        120,
+      ),
+    ).toBe(
+      'headers={"Authorization":"[redacted]"} sessionToken=[redacted] query=status:open',
+    );
+  });
+
   it("truncates long args previews", () => {
     expect(
       __test__.formatCallArgsPreview(
@@ -320,6 +365,101 @@ describe("call args preview formatting", () => {
     ).toBe('query="this is a deliberately long strin...');
   });
 });
+
+describe("mode resolution", () => {
+  it("defaults to lazy", () => {
+    expect(__test__.resolveMcporterMode(undefined)).toBe("lazy");
+  });
+
+  it("accepts preload", () => {
+    expect(__test__.resolveMcporterMode("preload")).toBe("preload");
+  });
+
+  it("falls back to lazy for unknown values", () => {
+    expect(__test__.resolveMcporterMode("surprise")).toBe("lazy");
+  });
+});
+
+describe("startup preload", () => {
+  it("warms the basic catalog", async () => {
+    const seenOptions: Array<{ includeSchema?: boolean }> = [];
+    const runtime = createRuntimeStub(
+      async (server, options) => {
+        seenOptions.push({ includeSchema: options?.includeSchema });
+        if (server === "beta") {
+          throw new Error("offline");
+        }
+        return [demoTool(server, "list_items")];
+      },
+      ["alpha", "beta"],
+    );
+
+    const summary = await preloadCatalog(runtime, new CatalogStore());
+
+    expect(summary.warmedServers).toEqual(["alpha"]);
+    expect(summary.warnings).toEqual(["beta: offline"]);
+    expect(seenOptions).toEqual([
+      { includeSchema: false },
+      { includeSchema: false },
+    ]);
+  });
+
+  it("only performs basic metadata reads", async () => {
+    const seenOptions: Array<{ includeSchema?: boolean; server: string }> = [];
+    const runtime = createRuntimeStub(
+      async (server, options) => {
+        seenOptions.push({
+          server,
+          includeSchema: options?.includeSchema,
+        });
+        return [demoTool(server, "list_items")];
+      },
+      ["alpha", "beta", "gamma"],
+    );
+
+    const summary = await preloadCatalog(runtime, new CatalogStore());
+
+    expect(summary.warmedServers).toEqual(["alpha", "beta", "gamma"]);
+    expect(seenOptions).toEqual([
+      { server: "alpha", includeSchema: false },
+      { server: "beta", includeSchema: false },
+      { server: "gamma", includeSchema: false },
+    ]);
+  });
+});
+
+function demoTool(
+  server: string,
+  name: string,
+  inputSchema?: unknown,
+): ServerToolInfo {
+  return {
+    name,
+    description: `${server}.${name}`,
+    inputSchema,
+  };
+}
+
+function createRuntimeStub(
+  listTools: Runtime["listTools"],
+  servers: string[],
+): Runtime {
+  return {
+    listServers: () => [...servers],
+    listTools,
+    getDefinitions: () => [],
+    getDefinition: () => {
+      throw new Error("not implemented");
+    },
+    registerDefinition: () => {},
+    callTool: async () => ({}),
+    listResources: async () => ({}),
+    connect: async () => {
+      throw new Error("not implemented");
+    },
+    close: async () => {},
+  } as unknown as Runtime;
+}
 
 function createExtensionHarness(): {
   tool: {
@@ -347,19 +487,10 @@ function createExtensionHarness(): {
         ) => { render: (width: number) => string[] };
       }
     | undefined;
-  const flags = new Map<string, string>();
 
   mcporterExtension({
-    getFlag(name: string) {
-      return flags.get(name);
-    },
     on() {},
     registerCommand() {},
-    registerFlag(name: string, options: { default?: string }) {
-      if (options.default !== undefined) {
-        flags.set(name, options.default);
-      }
-    },
     registerTool(definition: unknown) {
       tool = definition as typeof tool;
     },
