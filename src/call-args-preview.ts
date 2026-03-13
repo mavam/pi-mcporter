@@ -83,7 +83,10 @@ function redactPreviewValue(value: unknown, key?: string): unknown {
   }
 
   const entries = Object.entries(value as Record<string, unknown>).map(
-    ([entryKey, entryValue]) => [entryKey, redactPreviewValue(entryValue, entryKey)],
+    ([entryKey, entryValue]) => [
+      entryKey,
+      redactPreviewValue(entryValue, entryKey),
+    ],
   );
   return Object.fromEntries(entries);
 }

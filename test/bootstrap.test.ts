@@ -60,7 +60,9 @@ describe("createMcporterController", () => {
         packageVersion: "1.0.0",
       });
 
-      await expect(controller.buildSystemPromptAppend()).resolves.toBeUndefined();
+      await expect(
+        controller.buildSystemPromptAppend(),
+      ).resolves.toBeUndefined();
       expect(createRuntimeFn).not.toHaveBeenCalled();
     } finally {
       if (previousHome === undefined) {
@@ -79,16 +81,13 @@ describe("createMcporterController", () => {
     const settingsPath = join(settingsDirectory, "mcporter.json");
     const previousHome = process.env.HOME;
     let attempts = 0;
-    const runtime = createRuntimeStub(
-      async () => {
-        attempts += 1;
-        if (attempts === 1) {
-          await delay(30);
-        }
-        return [demoTool("alpha", "lookup")];
-      },
-      ["alpha"],
-    );
+    const runtime = createRuntimeStub(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        await delay(30);
+      }
+      return [demoTool("alpha", "lookup")];
+    }, ["alpha"]);
     process.env.HOME = homeDirectory;
     await mkdir(settingsDirectory, { recursive: true });
     await writeFile(settingsPath, JSON.stringify({ mode: "preload" }), "utf8");
@@ -102,7 +101,9 @@ describe("createMcporterController", () => {
         packageVersion: "1.0.0",
       });
 
-      await expect(controller.buildSystemPromptAppend()).resolves.toBeUndefined();
+      await expect(
+        controller.buildSystemPromptAppend(),
+      ).resolves.toBeUndefined();
       await expect(controller.buildSystemPromptAppend()).resolves.toContain(
         "alpha.lookup",
       );
@@ -126,18 +127,12 @@ describe("createMcporterController", () => {
     const settingsPath = join(settingsDirectory, "mcporter.json");
     const previousHome = process.env.HOME;
     let attempts = 0;
-    const runtime = createRuntimeStub(
-      async () => {
-        attempts += 1;
-        return [
-          demoTool(
-            "alpha",
-            attempts === 1 ? "legacy_lookup" : "fresh_lookup",
-          ),
-        ];
-      },
-      ["alpha"],
-    );
+    const runtime = createRuntimeStub(async () => {
+      attempts += 1;
+      return [
+        demoTool("alpha", attempts === 1 ? "legacy_lookup" : "fresh_lookup"),
+      ];
+    }, ["alpha"]);
     process.env.HOME = homeDirectory;
     await mkdir(settingsDirectory, { recursive: true });
     await writeFile(settingsPath, JSON.stringify({ mode: "preload" }), "utf8");

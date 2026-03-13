@@ -229,9 +229,10 @@ describe("extension startup modes", () => {
   it("uses MCPORTER_CONFIG when the settings file is malformed", async () => {
     vi.resetModules();
 
-    const runtime = createRuntimeStub(async () => [demoTool("alpha", "lookup")], [
-      "alpha",
-    ]);
+    const runtime = createRuntimeStub(
+      async () => [demoTool("alpha", "lookup")],
+      ["alpha"],
+    );
     const createRuntime = vi.fn().mockResolvedValue(runtime);
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
     const settingsDirectory = join(homeDirectory, ".pi", "agent");

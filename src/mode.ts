@@ -10,10 +10,7 @@ export function parseMcporterMode(
   }
 
   const normalized = value.trim().toLowerCase();
-  if (
-    normalized === "lazy" ||
-    normalized === "preload"
-  ) {
+  if (normalized === "lazy" || normalized === "preload") {
     return normalized;
   }
 

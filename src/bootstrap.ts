@@ -8,7 +8,10 @@ import {
   loadResolvedMcporterConfig,
   type ResolvedMcporterConfig,
 } from "./settings.js";
-import { RuntimeSession, type RuntimeSessionOptions } from "./runtime-session.js";
+import {
+  RuntimeSession,
+  type RuntimeSessionOptions,
+} from "./runtime-session.js";
 
 type CreateMcporterControllerOptions = {
   catalogService?: CatalogService;
