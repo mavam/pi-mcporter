@@ -59,6 +59,59 @@ pi
 - `Catch me up on #engineering in Slack from today.`
 - `Find the onboarding runbook in Notion and summarize the setup steps.`
 
+## 🔍 The three actions
+
+The `mcporter` tool has three actions that map to a natural discovery → execution workflow.
+
+### `search` — find tools by keyword
+
+Use when you don't know the exact server or tool name.
+
+```json
+{ "action": "search", "query": "linear issue", "limit": 5 }
+```
+
+Returns matching selectors with short descriptions:
+
+```
+linear.create_issue — Create a new issue in a Linear team
+linear.list_issues  — List issues matching a filter
+```
+
+### `describe` — get the full schema for a tool
+
+Use when you know the selector but need to see its required parameters before calling.
+
+```json
+{ "action": "describe", "selector": "linear.create_issue" }
+```
+
+Returns the full JSON Schema for the tool's input, including required vs. optional fields and their types.
+
+### `call` — invoke a tool
+
+Use once you know the selector and its schema.
+
+```json
+{
+  "action": "call",
+  "selector": "linear.create_issue",
+  "args": { "title": "Fix login bug", "teamId": "TEAM-1", "priority": 2 }
+}
+```
+
+For arguments that are awkward to express as nested JSON, you can pass them as a JSON string via `argsJson` instead of `args`.
+
+### Typical workflow
+
+```
+search "linear issue"          →  discover: linear.create_issue
+describe linear.create_issue   →  learn required fields: title, teamId
+call linear.create_issue       →  execute with those fields
+```
+
+In practice pi follows this pattern automatically. With `mode: "preload"` the catalog is already warm at agent start, so pi can often skip `search`/`describe` and jump straight to `call`.
+
 ## 🧰 Tool input (reference)
 
 Tool name: `mcporter`
