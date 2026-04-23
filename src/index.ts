@@ -247,7 +247,7 @@ function getFirstLine(text: string | undefined): string | undefined {
 
 function getExpandHint(): string {
   try {
-    return keyHint("expandTools", "to expand");
+    return keyHint("app.tools.expand", "to expand");
   } catch {
     return "to expand";
   }
