@@ -37,7 +37,7 @@
     ]
   },
   "scripts": {
-    "build": "rm -rf dist && esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js --external:mcporter --external:@mariozechner/pi-coding-agent --external:@mariozechner/pi-ai --external:@mariozechner/pi-tui --external:typebox",
+    "build": "rm -rf dist && esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js --external:mcporter --external:@earendil-works/pi-coding-agent --external:@earendil-works/pi-ai --external:@earendil-works/pi-tui --external:typebox",
     "prepare": "npm run build",
     "prepack": "npm run build",
     "check": "tsc --noEmit",
@@ -51,8 +51,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "typebox": "*",
     "@types/node": "^24.3.0",
     "esbuild": "^0.25.10",
@@ -60,9 +60,9 @@
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   }
 }

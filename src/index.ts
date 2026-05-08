@@ -1,17 +1,17 @@
 import { readFile } from "node:fs/promises";
-import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
   formatSize,
   keyHint,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   Text,
   truncateToWidth,
   type Component,
   visibleWidth,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
 import { handleSearchAction } from "./actions/search.js";

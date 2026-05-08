@@ -1,4 +1,4 @@
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import {
   DEFAULT_CALL_TIMEOUT_MS,

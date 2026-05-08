@@ -1,6 +1,6 @@
 # 🧳 pi-mcporter
 
-Use MCP tools from [pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) through one stable tool (`mcporter`), powered by [MCPorter](https://github.com/steipete/mcporter).
+Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) through one stable tool (`mcporter`), powered by [MCPorter](https://github.com/steipete/mcporter).
 
 ## 🧠 Philosophy: CLI > MCP
 

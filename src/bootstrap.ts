@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CatalogService } from "./catalog-service.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
 import { shouldPreloadCatalog } from "./mode.js";

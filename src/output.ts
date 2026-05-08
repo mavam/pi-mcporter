@@ -7,7 +7,7 @@ import {
   formatSize,
   truncateHead,
   truncateTail,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { wrapCallResult } from "mcporter";
 import { renderSchemaSnippet } from "./schema.js";
 import type { McporterCallOutputKind, OutputShape } from "./types.js";

@@ -1,4 +1,4 @@
-import { truncateLine } from "@mariozechner/pi-coding-agent";
+import { truncateLine } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "mcporter";
 import type { CatalogStore } from "../catalog-store.js";
 import { DEFAULT_SEARCH_LIMIT } from "../constants.js";

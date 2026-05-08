@@ -2,7 +2,7 @@ import {
   formatSize,
   truncateHead,
   truncateLine,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   SCHEMA_SNIPPET_MAX_BYTES,
   SCHEMA_SNIPPET_MAX_LINES,
