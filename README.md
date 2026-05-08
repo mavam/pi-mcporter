@@ -25,18 +25,10 @@ npm install -g mcporter
 npx mcporter list          # verify your servers are visible
 ```
 
-## 📦 Install
+## 🚀 Installation
 
-Install as a pi package:
-
-```bash
+```sh
 pi install npm:pi-mcporter
-```
-
-Try it once without installing:
-
-```bash
-pi -e npm:pi-mcporter
 ```
 
 ## 🚀 Quick start
@@ -161,6 +153,12 @@ Tool output follows pi's native expand/collapse behavior:
 - **Slow calls**: increase `timeoutMs` in `~/.pi/agent/mcporter.json` or override `timeoutMs` per tool call.
 - **Config not found**: set `configPath` in `~/.pi/agent/mcporter.json` or export `MCPORTER_CONFIG=<path>`.
 - **Truncated output**: the response includes a temp file path with full output.
+
+## 🧹 Uninstall
+
+```sh
+pi remove npm:pi-mcporter
+```
 
 ## 📄 License
 
