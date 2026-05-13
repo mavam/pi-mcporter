@@ -1,4 +1,5 @@
 import { createRuntime, type Runtime } from "mcporter";
+import { attachSecretEnvToRuntime, resolveSecretEnv } from "./secret-env.js";
 
 class StaleRuntimeSessionError extends Error {
   constructor() {
@@ -9,12 +10,16 @@ class StaleRuntimeSessionError extends Error {
 export type RuntimeSessionOptions = {
   createRuntimeFn?: typeof createRuntime;
   getRuntimeConfigPath: () => Promise<string | undefined>;
+  getRuntimeEnv?: () => Promise<Record<string, string> | undefined>;
   packageVersion: string;
 };
 
 export class RuntimeSession {
   private readonly createRuntimeFn: typeof createRuntime;
   private readonly getRuntimeConfigPath: () => Promise<string | undefined>;
+  private readonly getRuntimeEnv: () => Promise<
+    Record<string, string> | undefined
+  >;
   private readonly packageVersion: string;
 
   private generation = 0;
@@ -24,6 +29,7 @@ export class RuntimeSession {
   constructor(options: RuntimeSessionOptions) {
     this.createRuntimeFn = options.createRuntimeFn ?? createRuntime;
     this.getRuntimeConfigPath = options.getRuntimeConfigPath;
+    this.getRuntimeEnv = options.getRuntimeEnv ?? (async () => undefined);
     this.packageVersion = options.packageVersion;
   }
 
@@ -35,16 +41,18 @@ export class RuntimeSession {
     if (!this.runtimePromise) {
       const generation = this.generation;
       let promise: Promise<Runtime>;
-      promise = this.getRuntimeConfigPath()
-        .then((configPath) => {
+      promise = Promise.all([this.getRuntimeConfigPath(), this.getRuntimeEnv()])
+        .then(async ([configPath, env]) => {
           this.throwIfStale(generation);
-          return this.createRuntimeFn({
+          const runtime = await this.createRuntimeFn({
             ...(configPath ? { configPath } : {}),
             clientInfo: {
               name: "pi-mcporter",
               version: this.packageVersion,
             },
           });
+          attachSecretEnvToRuntime(runtime, resolveSecretEnv(env));
+          return runtime;
         })
         .then(async (created) => {
           if (generation !== this.generation) {

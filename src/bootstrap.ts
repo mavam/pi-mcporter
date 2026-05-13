@@ -32,6 +32,7 @@ export function createMcporterController(
     createRuntimeFn: options.createRuntimeFn,
     getRuntimeConfigPath: async () =>
       (await ensureResolvedConfig()).runtimeConfigPath,
+    getRuntimeEnv: async () => (await ensureResolvedConfig()).env,
     packageVersion: options.packageVersion,
   });
   const promptCatalogProvider = new PromptCatalogProvider(

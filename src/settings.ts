@@ -8,6 +8,7 @@ import { resolveMcporterMode, type McporterMode } from "./mode.js";
 
 export type McporterSettings = {
   configPath?: string;
+  env?: Record<string, string>;
   mode: McporterMode;
   timeoutMs: number;
 };
@@ -41,6 +42,7 @@ export function normalizeMcporterSettings(value: unknown): McporterSettings {
 
   const defaults = getDefaultMcporterSettings();
   const configPath = normalizeConfigPath(value.configPath);
+  const env = normalizeEnv(value.env);
   const timeoutMs = normalizeTimeoutMs(value.timeoutMs);
   const mode =
     typeof value.mode === "string"
@@ -49,6 +51,7 @@ export function normalizeMcporterSettings(value: unknown): McporterSettings {
 
   return {
     configPath,
+    ...(env ? { env } : {}),
     mode,
     timeoutMs,
   };
@@ -130,6 +133,21 @@ function normalizeConfigPath(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeEnv(value: unknown): Record<string, string> | undefined {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value).flatMap(([key, rawValue]) => {
+    if (typeof rawValue !== "string") {
+      return [];
+    }
+    return [[key, rawValue] as const];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function normalizeTimeoutMs(value: unknown): number {
