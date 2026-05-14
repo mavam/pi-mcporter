@@ -1,6 +1,6 @@
 # 🧳 pi-mcporter
 
-Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) through one stable tool (`mcporter`), powered by [MCPorter](https://github.com/steipete/mcporter).
+Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) through one stable tool (`mcporter`), powered by [MCPorter](https://github.com/openclaw/mcporter).
 
 ## 🧠 Philosophy: CLI > MCP
 
@@ -18,7 +18,7 @@ Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/pack
 
 ## 📋 Prerequisites
 
-You need [MCPorter](https://github.com/steipete/mcporter) installed and configured with at least one MCP server:
+You need [MCPorter](https://github.com/openclaw/mcporter) installed and configured with at least one MCP server:
 
 ```bash
 npm install -g mcporter
@@ -124,16 +124,42 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
 {
   "configPath": "/absolute/path/to/mcporter.json",
   "timeoutMs": 30000,
-  "mode": "lazy"
+  "mode": "lazy",
+  "mcpServers": {
+    "excalidraw": {
+      "env": {
+        "EXCALIDRAW_API_KEY": "!security find-generic-password -s 'excalidraw-api-key' -w"
+      }
+    }
+  }
 }
 ```
 
 - `MCPORTER_CONFIG=/absolute/path/to/mcporter.json` still overrides `configPath` from the settings file.
 - `configPath`: optional explicit MCPorter config path. If omitted, MCPorter uses its normal default resolution.
+- `mcpServers`: optional Pi-only overlay keyed by MCPorter server name. Currently supports per-server `env` values that Pi injects into the matching MCP server definition at runtime.
+  - `mcpServers.<name>.env`: environment variables for that server only. Values are literals by default; values starting with `!` execute as shell commands and use stdout, matching pi's command-backed secret style; values exactly matching `$env:VAR` or `${VAR}` read from the current process environment.
 - `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
 - `mode`: optional default MCP tool visibility mode.
   - `lazy`: only the stable `mcporter` proxy tool is visible and MCP metadata loads on demand
   - `preload`: still only exposes `mcporter`, but preloads MCP tool metadata before agent start so the agent can skip unnecessary discovery more often
+
+For example, keep `~/.mcporter/mcporter.json` secret-free:
+
+```json
+{
+  "mcpServers": {
+    "excalidraw": {
+      "baseUrl": "https://api.excalidraw.com/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer ${EXCALIDRAW_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Then inject `EXCALIDRAW_API_KEY` from Keychain through the matching `mcpServers.excalidraw.env` overlay in `~/.pi/agent/mcporter.json` as shown above.
 
 Legacy extension flags `--mcporter-config` and `--mcporter-timeout-ms` are no longer supported. Use `~/.pi/agent/mcporter.json`, `MCPORTER_CONFIG`, and per-call `timeoutMs` instead.
 

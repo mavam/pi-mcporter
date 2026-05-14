@@ -1,4 +1,3 @@
-import { truncateLine } from "@earendil-works/pi-coding-agent";
 import type { Runtime } from "mcporter";
 import type { CatalogStore } from "../catalog-store.js";
 import { DEFAULT_SEARCH_LIMIT } from "../constants.js";
@@ -41,15 +40,18 @@ export async function handleSearchAction(
     lines.push("");
     for (const match of matches) {
       const desc = cleanSingleLine(match.description ?? "");
-      const descriptor =
-        desc.length > 0 ? ` — ${truncateLine(desc, 140).text}` : "";
-      lines.push(`- ${match.selector}${descriptor}`);
+      const descriptor = desc.length > 0 ? desc : "";
+      lines.push(
+        descriptor
+          ? `- \`${formatMarkdownCodeSpan(match.selector)}\`: ${descriptor}`
+          : `- \`${formatMarkdownCodeSpan(match.selector)}\``,
+      );
     }
   }
 
   lines.push("");
   lines.push(
-    "Next step: use action='describe' with selector='server.tool' for full schema.",
+    "Next step: use `action='describe'` with `selector='server.tool'` for full schema.",
   );
 
   if (catalog.warnings.length > 0) {
@@ -71,4 +73,8 @@ export async function handleSearchAction(
       fullOutputPath: shaped.fullOutputPath,
     } satisfies ToolDetails,
   };
+}
+
+function formatMarkdownCodeSpan(value: string): string {
+  return value.replaceAll("`", "\\`");
 }

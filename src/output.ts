@@ -24,14 +24,14 @@ export function formatCallOutput(
   const wrapped = wrapCallResult(rawResult).callResult;
   const lines: string[] = [];
 
-  lines.push(`Called ${selector} successfully.`);
+  lines.push(`Called \`${formatMarkdownCodeSpan(selector)}\` successfully.`);
 
   const text = wrapped.text();
   let kind: McporterCallOutputKind = "raw";
   if (text && text.trim().length > 0) {
     kind = "text";
     lines.push("");
-    lines.push("Text response:");
+    lines.push("### Text response");
     lines.push(text.trim());
   }
 
@@ -41,8 +41,10 @@ export function formatCallOutput(
       kind = "structured";
     }
     lines.push("");
-    lines.push("Structured content snippet:");
+    lines.push("### Structured content snippet");
+    lines.push("```json");
     lines.push(renderSchemaSnippet(structured));
+    lines.push("```");
   } else {
     const parsedJson = wrapped.json();
     if (parsedJson !== null && parsedJson !== undefined) {
@@ -50,15 +52,19 @@ export function formatCallOutput(
         kind = "json";
       }
       lines.push("");
-      lines.push("JSON payload snippet:");
+      lines.push("### JSON payload snippet");
+      lines.push("```json");
       lines.push(renderSchemaSnippet(parsedJson));
+      lines.push("```");
     }
   }
 
   if (lines.length === 1) {
     lines.push("");
-    lines.push("Raw result envelope snippet:");
+    lines.push("### Raw result envelope snippet");
+    lines.push("```json");
     lines.push(renderSchemaSnippet(rawResult));
+    lines.push("```");
   }
 
   return { text: lines.join("\n"), kind };
@@ -105,6 +111,10 @@ async function shapeWithStrategy(
   text += ` Full output saved to: ${fullOutputPath}]`;
 
   return { text, truncation, fullOutputPath };
+}
+
+function formatMarkdownCodeSpan(value: string): string {
+  return value.replaceAll("`", "\\`");
 }
 
 function describeCallOutputKind(kind: McporterCallOutputKind): string {

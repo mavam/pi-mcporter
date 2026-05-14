@@ -1,8 +1,4 @@
-import {
-  formatSize,
-  truncateHead,
-  truncateLine,
-} from "@earendil-works/pi-coding-agent";
+import { formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import {
   SCHEMA_SNIPPET_MAX_BYTES,
   SCHEMA_SNIPPET_MAX_LINES,
@@ -40,11 +36,11 @@ export function summarizeInputSchema(schema: unknown): string[] {
     const propertySchema = properties[name];
     const type = schemaTypeSummary(propertySchema);
     const desc = propertyDescription(propertySchema);
-    let line = `- ${name}${required.has(name) ? " (required)" : ""}: ${type}`;
+    let line = `- \`${formatMarkdownCodeSpan(name)}\`${required.has(name) ? " (required)" : ""}: \`${formatMarkdownCodeSpan(type)}\``;
     if (desc) {
       line += ` — ${desc}`;
     }
-    lines.push(truncateLine(line, 200).text);
+    lines.push(line);
   }
 
   if (propertyNames.length > preview.length) {
@@ -64,9 +60,9 @@ export function summarizeOutputSchema(schema: unknown): string[] {
   const type = schemaTypeSummary(schema);
   const description = propertyDescription(schema);
   if (description) {
-    return [`Output: ${type} — ${description}`];
+    return [`Output: \`${formatMarkdownCodeSpan(type)}\` — ${description}`];
   }
-  return [`Output: ${type}`];
+  return [`Output: \`${formatMarkdownCodeSpan(type)}\``];
 }
 
 export function renderSchemaSnippet(schema: unknown): string {
@@ -153,5 +149,9 @@ function propertyDescription(schema: unknown): string {
     return "";
   }
 
-  return cleanSingleLine(schema.description).slice(0, 140);
+  return cleanSingleLine(schema.description);
+}
+
+function formatMarkdownCodeSpan(value: string): string {
+  return value.replaceAll("`", "\\`");
 }
