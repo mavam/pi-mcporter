@@ -1,5 +1,8 @@
 import { createRuntime, type Runtime } from "mcporter";
-import { attachSecretEnvToRuntime, resolveSecretEnv } from "./secret-env.js";
+import { attachSecretEnvToRuntime } from "./secret-env.js";
+import type { McporterServerSettings } from "./settings.js";
+
+type RuntimeSessionServerSettings = Record<string, McporterServerSettings>;
 
 class StaleRuntimeSessionError extends Error {
   constructor() {
@@ -10,15 +13,17 @@ class StaleRuntimeSessionError extends Error {
 export type RuntimeSessionOptions = {
   createRuntimeFn?: typeof createRuntime;
   getRuntimeConfigPath: () => Promise<string | undefined>;
-  getRuntimeEnv?: () => Promise<Record<string, string> | undefined>;
+  getRuntimeServerSettings?: () => Promise<
+    RuntimeSessionServerSettings | undefined
+  >;
   packageVersion: string;
 };
 
 export class RuntimeSession {
   private readonly createRuntimeFn: typeof createRuntime;
   private readonly getRuntimeConfigPath: () => Promise<string | undefined>;
-  private readonly getRuntimeEnv: () => Promise<
-    Record<string, string> | undefined
+  private readonly getRuntimeServerSettings: () => Promise<
+    RuntimeSessionServerSettings | undefined
   >;
   private readonly packageVersion: string;
 
@@ -29,7 +34,8 @@ export class RuntimeSession {
   constructor(options: RuntimeSessionOptions) {
     this.createRuntimeFn = options.createRuntimeFn ?? createRuntime;
     this.getRuntimeConfigPath = options.getRuntimeConfigPath;
-    this.getRuntimeEnv = options.getRuntimeEnv ?? (async () => undefined);
+    this.getRuntimeServerSettings =
+      options.getRuntimeServerSettings ?? (async () => undefined);
     this.packageVersion = options.packageVersion;
   }
 
@@ -41,8 +47,11 @@ export class RuntimeSession {
     if (!this.runtimePromise) {
       const generation = this.generation;
       let promise: Promise<Runtime>;
-      promise = Promise.all([this.getRuntimeConfigPath(), this.getRuntimeEnv()])
-        .then(async ([configPath, env]) => {
+      promise = Promise.all([
+        this.getRuntimeConfigPath(),
+        this.getRuntimeServerSettings(),
+      ])
+        .then(async ([configPath, mcpServers]) => {
           this.throwIfStale(generation);
           const runtime = await this.createRuntimeFn({
             ...(configPath ? { configPath } : {}),
@@ -51,7 +60,7 @@ export class RuntimeSession {
               version: this.packageVersion,
             },
           });
-          attachSecretEnvToRuntime(runtime, resolveSecretEnv(env));
+          attachSecretEnvToRuntime(runtime, mcpServers);
           return runtime;
         })
         .then(async (created) => {

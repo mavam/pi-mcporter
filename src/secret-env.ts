@@ -1,10 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
+import type { McporterServerSettings } from "./settings.js";
 
 const SECRET_COMMAND_TIMEOUT_MS = 10_000;
 
+const ENV_DIRECT_PATTERN = /^\$env:([A-Za-z_][A-Za-z0-9_]*)$/;
+const ENV_BRACED_PATTERN = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+
 type RuntimeWithDefinitions = {
-  getDefinitions(): RuntimeServerDefinition[];
+  getDefinition(server: string): RuntimeServerDefinition;
   registerDefinition(
     definition: RuntimeServerDefinition,
     options?: { overwrite?: boolean },
@@ -15,17 +19,18 @@ type RuntimeServerDefinition = {
   readonly env?: Record<string, string>;
 };
 
-export function resolveSecretEnv(
-  env: Record<string, string> | undefined,
+export function resolveServerEnv(
+  serverName: string,
+  settings: McporterServerSettings | undefined,
 ): Record<string, string> | undefined {
-  if (!env) {
+  if (!settings?.env) {
     return undefined;
   }
 
   const resolved = Object.fromEntries(
-    Object.entries(env).map(([key, value]) => [
+    Object.entries(settings.env).map(([key, value]) => [
       key,
-      resolveConfigValue(value, `mcporter env.${key}`),
+      resolveConfigValue(value, `mcporter mcpServers.${serverName}.env.${key}`),
     ]),
   );
   return Object.keys(resolved).length > 0 ? resolved : undefined;
@@ -33,13 +38,19 @@ export function resolveSecretEnv(
 
 export function attachSecretEnvToRuntime(
   runtime: RuntimeWithDefinitions,
-  env: Record<string, string> | undefined,
+  mcpServers: Record<string, McporterServerSettings> | undefined,
 ): void {
-  if (!env) {
+  if (!mcpServers) {
     return;
   }
 
-  for (const definition of runtime.getDefinitions()) {
+  for (const [serverName, settings] of Object.entries(mcpServers)) {
+    const env = resolveServerEnv(serverName, settings);
+    if (!env) {
+      continue;
+    }
+
+    const definition = runtime.getDefinition(serverName);
     runtime.registerDefinition(
       {
         ...definition,
@@ -58,7 +69,24 @@ function resolveConfigValue(value: string, description: string): string {
     return executeSecretCommand(value.slice(1), description);
   }
 
-  return process.env[value] || value;
+  const directMatch = ENV_DIRECT_PATTERN.exec(value);
+  const bracedMatch = ENV_BRACED_PATTERN.exec(value);
+  const envName = directMatch?.[1] ?? bracedMatch?.[1];
+  if (envName) {
+    return requireProcessEnv(envName, description);
+  }
+
+  return value;
+}
+
+function requireProcessEnv(envName: string, description: string): string {
+  const value = process.env[envName];
+  if (value === undefined) {
+    throw new Error(
+      `Environment variable '${envName}' is required for ${description}.`,
+    );
+  }
+  return value;
 }
 
 function executeSecretCommand(command: string, description: string): string {

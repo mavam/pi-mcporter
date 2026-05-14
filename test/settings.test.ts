@@ -54,19 +54,28 @@ describe("mcporter settings", () => {
     expect(
       normalizeMcporterSettings({
         configPath: "  /tmp/mcporter.json  ",
-        env: {
-          EXCALIDRAW_API_KEY:
-            "!security find-generic-password -s excalidraw-api-key -w",
-          IGNORED: 42,
+        mcpServers: {
+          excalidraw: {
+            env: {
+              EXCALIDRAW_API_KEY:
+                "!security find-generic-password -s excalidraw-api-key -w",
+              IGNORED: 42,
+            },
+          },
+          ignored: 42,
         },
         timeoutMs: 45_000,
         mode: "PRELOAD",
       }),
     ).toEqual({
       configPath: "/tmp/mcporter.json",
-      env: {
-        EXCALIDRAW_API_KEY:
-          "!security find-generic-password -s excalidraw-api-key -w",
+      mcpServers: {
+        excalidraw: {
+          env: {
+            EXCALIDRAW_API_KEY:
+              "!security find-generic-password -s excalidraw-api-key -w",
+          },
+        },
       },
       timeoutMs: 45_000,
       mode: "preload",
@@ -100,17 +109,21 @@ describe("mcporter settings", () => {
     );
   });
 
-  it("loads resolved config with effective runtime config path and env", async () => {
+  it("loads resolved config with effective runtime config path and server env overlay", async () => {
     const config = await loadResolvedMcporterConfig({
       homeDirectory: "/home/tester",
       env: { MCPORTER_CONFIG: "/env/mcporter.json" },
       async readFileFn() {
         return JSON.stringify({
           configPath: "/settings/mcporter.json",
-          env: {
-            PLAIN_TOKEN: "literal-token",
-            COMMAND_TOKEN:
-              "!node -e \"process.stdout.write('command-token\\n')\"",
+          mcpServers: {
+            demo: {
+              env: {
+                PLAIN_TOKEN: "literal-token",
+                COMMAND_TOKEN:
+                  "!node -e \"process.stdout.write('command-token\\n')\"",
+              },
+            },
           },
           timeoutMs: 45_000,
           mode: "preload",
@@ -120,9 +133,14 @@ describe("mcporter settings", () => {
 
     expect(config).toEqual({
       configPath: "/settings/mcporter.json",
-      env: {
-        PLAIN_TOKEN: "literal-token",
-        COMMAND_TOKEN: "!node -e \"process.stdout.write('command-token\\n')\"",
+      mcpServers: {
+        demo: {
+          env: {
+            PLAIN_TOKEN: "literal-token",
+            COMMAND_TOKEN:
+              "!node -e \"process.stdout.write('command-token\\n')\"",
+          },
+        },
       },
       runtimeConfigPath: "/env/mcporter.json",
       settingsPath: "/home/tester/.pi/agent/mcporter.json",

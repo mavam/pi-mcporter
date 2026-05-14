@@ -6,9 +6,13 @@ import { isPlainObject, toErrorMessage } from "./helpers.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
 import { resolveMcporterMode, type McporterMode } from "./mode.js";
 
+export type McporterServerSettings = {
+  env?: Record<string, string>;
+};
+
 export type McporterSettings = {
   configPath?: string;
-  env?: Record<string, string>;
+  mcpServers?: Record<string, McporterServerSettings>;
   mode: McporterMode;
   timeoutMs: number;
 };
@@ -42,7 +46,7 @@ export function normalizeMcporterSettings(value: unknown): McporterSettings {
 
   const defaults = getDefaultMcporterSettings();
   const configPath = normalizeConfigPath(value.configPath);
-  const env = normalizeEnv(value.env);
+  const mcpServers = normalizeMcpServers(value.mcpServers);
   const timeoutMs = normalizeTimeoutMs(value.timeoutMs);
   const mode =
     typeof value.mode === "string"
@@ -51,7 +55,7 @@ export function normalizeMcporterSettings(value: unknown): McporterSettings {
 
   return {
     configPath,
-    ...(env ? { env } : {}),
+    ...(mcpServers ? { mcpServers } : {}),
     mode,
     timeoutMs,
   };
@@ -135,7 +139,32 @@ function normalizeConfigPath(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function normalizeEnv(value: unknown): Record<string, string> | undefined {
+function normalizeMcpServers(
+  value: unknown,
+): Record<string, McporterServerSettings> | undefined {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value).flatMap(([serverName, rawSettings]) => {
+    if (!isPlainObject(rawSettings)) {
+      return [];
+    }
+
+    const env = normalizeServerEnv(rawSettings.env);
+    if (!env) {
+      return [];
+    }
+
+    return [[serverName, { env }] as const];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeServerEnv(
+  value: unknown,
+): Record<string, string> | undefined {
   if (!isPlainObject(value)) {
     return undefined;
   }
