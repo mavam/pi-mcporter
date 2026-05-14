@@ -4,13 +4,15 @@ import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
   formatSize,
-  keyHint,
+  getMarkdownTheme,
+  keyText,
 } from "@earendil-works/pi-coding-agent";
 import {
+  Container,
+  Markdown,
   Text,
-  truncateToWidth,
+  TruncatedText,
   type Component,
-  visibleWidth,
 } from "@earendil-works/pi-tui";
 import { handleCallAction } from "./actions/call.js";
 import { handleDescribeAction } from "./actions/describe.js";
@@ -106,10 +108,10 @@ export default function mcporterExtension(pi: ExtensionAPI) {
       return renderCallHeader(args as McporterParams, theme);
     },
 
-    renderResult(result, { expanded, isPartial }, theme) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as ToolDetails | undefined;
       const text = extractTextContent(result.content);
-      const isError = Boolean((result as { isError?: boolean }).isError);
+      const isError = Boolean(context?.isError);
 
       if (isPartial) {
         return renderSimpleText(text ?? "Working…", theme, "warning");
@@ -123,23 +125,11 @@ export default function mcporterExtension(pi: ExtensionAPI) {
         return renderBlockText(text ?? "", theme, "toolOutput");
       }
 
-      if (details.action !== "call") {
-        if (expanded) {
-          return renderBlockText(text ?? "", theme, "toolOutput");
-        }
-        return renderCollapsedActionSummary(details, text, theme);
-      }
-
       if (expanded) {
         return renderBlockText(text ?? "", theme, "toolOutput");
       }
 
-      const summary =
-        details.callOutputSummary ??
-        `${details.selector ?? "mcporter call"}: output available`;
-      let summaryText = theme.fg("success", summary);
-      summaryText += theme.fg("muted", ` (${getExpandHint()})`);
-      return new Text(summaryText, 0, 0);
+      return renderCollapsedResult(details, text, theme);
     },
   });
 
@@ -190,10 +180,15 @@ function renderBlockText(
   text: string,
   theme: Pick<Theme, "fg">,
   color: "toolOutput" | "error",
-): Text {
+): Component {
   if (!text) {
     return new Text("", 0, 0);
   }
+
+  if (color === "toolOutput") {
+    return new Markdown(`\n${text}`, 0, 0, getMarkdownTheme());
+  }
+
   const rendered = text
     .split("\n")
     .map((line) => theme.fg(color, line))
@@ -209,26 +204,24 @@ function renderSimpleText(
   return new Text(theme.fg(color, text), 0, 0);
 }
 
-function renderCollapsedActionSummary(
+function renderCollapsedResult(
   details: ToolDetails,
   text: string | undefined,
-  theme: Pick<Theme, "fg">,
-): Text {
-  const summary = getCollapsedActionSummary(details, text);
-  let summaryText = theme.fg("success", summary);
-  summaryText += theme.fg("muted", ` (${getExpandHint()})`);
-  return new Text(summaryText, 0, 0);
+  theme: Theme,
+): Component {
+  const summary =
+    details.action === "search"
+      ? (getFirstLine(text) ?? getCollapsedActionSummary(details))
+      : getCollapsedActionSummary(details);
+  return new Text(withExpandHint(theme.fg("success", summary), theme), 0, 0);
 }
 
-function getCollapsedActionSummary(
-  details: ToolDetails,
-  text: string | undefined,
-): string {
+function getCollapsedActionSummary(details: ToolDetails): string {
   switch (details.action) {
     case "describe":
       return `${details.selector ?? "mcporter describe"} schema available`;
     case "search":
-      return getFirstLine(text) ?? "mcporter search results available";
+      return "mcporter search results available";
     case "call":
       return (
         details.callOutputSummary ??
@@ -245,59 +238,74 @@ function getFirstLine(text: string | undefined): string | undefined {
   return firstLine && firstLine.length > 0 ? firstLine : undefined;
 }
 
-function getExpandHint(): string {
+function withExpandHint(text: string, theme: Pick<Theme, "fg">): string {
+  return `${text} (${formatExpandHint(theme)})`;
+}
+
+function formatExpandHint(theme: Pick<Theme, "fg">): string {
+  let key = "";
   try {
-    return keyHint("app.tools.expand", "to expand");
+    key = keyText("app.tools.expand").trim();
   } catch {
-    return "to expand";
+    key = "";
   }
+
+  return `${theme.fg("dim", key || "ctrl+o")}${theme.fg("muted", " to expand")}`;
 }
 
 function renderCallHeader(params: McporterParams, theme: Theme): Component {
-  return {
-    invalidate() {},
-    render(width) {
-      let header = theme.fg("toolTitle", theme.bold("mcporter"));
-      header += ` ${theme.fg("accent", params.action)}`;
+  return new McporterCallHeader(params, theme);
+}
 
-      if (
-        (params.action === "describe" || params.action === "call") &&
-        typeof params.selector === "string" &&
-        params.selector.trim().length > 0
-      ) {
-        header += ` ${theme.fg("muted", params.selector.trim())}`;
-      } else if (
-        params.action === "search" &&
-        typeof params.query === "string" &&
-        params.query.trim().length > 0
-      ) {
-        header += ` ${theme.fg("muted", `"${cleanSingleLine(params.query).slice(0, 80)}"`)}`;
-      }
+class McporterCallHeader extends Container {
+  constructor(
+    private readonly params: McporterParams,
+    private readonly theme: Theme,
+  ) {
+    super();
+  }
 
-      const lines: string[] = [];
-      const headerLine = truncateToWidth(header, width);
-      lines.push(
-        headerLine + " ".repeat(Math.max(0, width - visibleWidth(headerLine))),
+  override render(width: number): string[] {
+    const container = new Container();
+    container.addChild(
+      new TruncatedText(formatCallTitle(this.params, this.theme), 0, 0),
+    );
+
+    if (this.params.action === "call") {
+      const preview = formatCallArgsPreview(
+        this.params,
+        Math.max(0, width - 2),
       );
-
-      if (params.action === "call") {
-        const previewWidth = Math.max(0, width - 2);
-        const callArgsPreview = formatCallArgsPreview(params, previewWidth);
-        if (callArgsPreview) {
-          const previewLine = truncateToWidth(
-            `  ${theme.fg("muted", callArgsPreview)}`,
-            width,
-          );
-          lines.push(
-            previewLine +
-              " ".repeat(Math.max(0, width - visibleWidth(previewLine))),
-          );
-        }
+      if (preview) {
+        container.addChild(
+          new TruncatedText(`  ${this.theme.fg("muted", preview)}`, 0, 0),
+        );
       }
+    }
 
-      return lines;
-    },
-  };
+    return container.render(width);
+  }
+}
+
+function formatCallTitle(params: McporterParams, theme: Theme): string {
+  let header = theme.fg("toolTitle", theme.bold("mcporter"));
+  header += ` ${theme.fg("accent", params.action)}`;
+
+  if (
+    (params.action === "describe" || params.action === "call") &&
+    typeof params.selector === "string" &&
+    params.selector.trim().length > 0
+  ) {
+    header += ` ${theme.fg("muted", params.selector.trim())}`;
+  } else if (
+    params.action === "search" &&
+    typeof params.query === "string" &&
+    params.query.trim().length > 0
+  ) {
+    header += ` ${theme.fg("muted", `"${cleanSingleLine(params.query).slice(0, 80)}"`)}`;
+  }
+
+  return header;
 }
 
 export const __test__ = {

@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
+import { initTheme } from "@earendil-works/pi-coding-agent";
+import { handleSearchAction } from "../src/actions/search.ts";
 import { CatalogStore } from "../src/catalog-store.ts";
 import mcporterExtension, { __test__ } from "../src/index.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
 import { preloadCatalog } from "../src/startup.ts";
+
+beforeAll(() => {
+  initTheme("dark", false);
+});
 
 describe("mcporter renderer", () => {
   it("collapses describe output until expanded", () => {
@@ -79,7 +85,7 @@ describe("mcporter renderer", () => {
     );
     expect(collapsed).toContain("to expand");
     expect(collapsed).not.toContain("- linear.list_issues");
-    expect(expanded).toContain("- linear.list_issues");
+    expect(expanded).toContain("linear.list_issues");
   });
 
   it("collapses call output until expanded", () => {
@@ -249,6 +255,28 @@ describe("mcporter renderer", () => {
   });
 });
 
+describe("search output formatting", () => {
+  it("formats matching tools as markdown bullets", async () => {
+    const runtime = createRuntimeStub(
+      async () => [
+        demoTool("linear", "list_issues", undefined, "List issues by status"),
+      ],
+      ["linear"],
+    );
+
+    const result = await handleSearchAction(
+      runtime,
+      { action: "search", query: "issues" },
+      undefined,
+      new CatalogStore(),
+    );
+
+    const text =
+      result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(text).toContain("- `linear.list_issues`: List issues by status");
+  });
+});
+
 describe("call output formatting", () => {
   it("classifies text responses", () => {
     const formatted = formatCallOutput("demo.echo", {
@@ -256,7 +284,7 @@ describe("call output formatting", () => {
     });
 
     expect(formatted.kind).toBe("text");
-    expect(formatted.text).toContain("Text response:");
+    expect(formatted.text).toContain("### Text response");
   });
 
   it("classifies structured responses", () => {
@@ -265,7 +293,7 @@ describe("call output formatting", () => {
     });
 
     expect(formatted.kind).toBe("structured");
-    expect(formatted.text).toContain("Structured content snippet:");
+    expect(formatted.text).toContain("### Structured content snippet");
   });
 
   it("classifies JSON responses", () => {
@@ -274,14 +302,14 @@ describe("call output formatting", () => {
     });
 
     expect(formatted.kind).toBe("json");
-    expect(formatted.text).toContain("JSON payload snippet:");
+    expect(formatted.text).toContain("### JSON payload snippet");
   });
 
   it("falls back to raw envelopes", () => {
     const formatted = formatCallOutput("demo.raw", { ok: true });
 
     expect(formatted.kind).toBe("raw");
-    expect(formatted.text).toContain("Raw result envelope snippet:");
+    expect(formatted.text).toContain("### Raw result envelope snippet");
   });
 
   it("marks truncated summaries", () => {
@@ -432,10 +460,11 @@ function demoTool(
   server: string,
   name: string,
   inputSchema?: unknown,
+  description = `${server}.${name}`,
 ): ServerToolInfo {
   return {
     name,
-    description: `${server}.${name}`,
+    description,
     inputSchema,
   };
 }
@@ -471,6 +500,7 @@ function createExtensionHarness(): {
       result: unknown,
       options: { expanded: boolean; isPartial: boolean },
       theme: ReturnType<typeof createTheme>,
+      context?: { isError?: boolean },
     ) => { render: (width: number) => string[] };
   };
 } {
@@ -484,6 +514,7 @@ function createExtensionHarness(): {
           result: unknown,
           options: { expanded: boolean; isPartial: boolean },
           theme: ReturnType<typeof createTheme>,
+          context?: { isError?: boolean },
         ) => { render: (width: number) => string[] };
       }
     | undefined;

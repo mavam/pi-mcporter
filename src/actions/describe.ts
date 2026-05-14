@@ -60,22 +60,22 @@ export async function handleDescribeAction(
   }
 
   const lines: string[] = [];
-  lines.push(`${resolved.selector}`);
+  lines.push(`## \`${formatMarkdownCodeSpan(resolved.selector)}\``);
   if (resolved.description) {
-    lines.push(cleanParagraph(resolved.description));
+    lines.push("", cleanParagraph(resolved.description));
   }
-  lines.push("");
+  lines.push("", "### Input parameters", "");
   lines.push(...summarizeInputSchema(resolved.inputSchema));
-  lines.push("");
+  lines.push("", "### Output", "");
   lines.push(...summarizeOutputSchema(resolved.outputSchema));
-  lines.push("");
-  lines.push("Raw schema snippet:");
+  lines.push("", "### Raw schema snippet", "", "```json");
   lines.push(
     renderSchemaSnippet({
       inputSchema: resolved.inputSchema,
       outputSchema: resolved.outputSchema,
     }),
   );
+  lines.push("```");
 
   const shaped = await shapeOutput(lines.join("\n"));
   return {
@@ -87,4 +87,8 @@ export async function handleDescribeAction(
       fullOutputPath: shaped.fullOutputPath,
     } satisfies ToolDetails,
   };
+}
+
+function formatMarkdownCodeSpan(value: string): string {
+  return value.replaceAll("`", "\\`");
 }
