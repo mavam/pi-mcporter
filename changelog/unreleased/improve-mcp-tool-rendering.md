@@ -3,6 +3,7 @@ title: Improve MCP tool rendering
 type: change
 authors:
   - mavam
+pr: 4
 created: 2026-05-14T08:58:00Z
 ---
 
