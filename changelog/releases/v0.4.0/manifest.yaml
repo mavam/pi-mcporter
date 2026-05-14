@@ -1,0 +1,10 @@
+created: 2026-05-14
+title: Command-backed MCP env secrets
+intro: >-
+  This release lets Pi MCPorter inject per-server MCP environment secrets from literals,
+  environment variables, and commands while keeping credentials out of MCPorter config
+  files. It also improves MCP tool output rendering with clearer Markdown sections
+  and Pi's native expand/collapse behavior.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.3.2
