@@ -1,6 +1,11 @@
+import { dirname } from "node:path";
 import { createRuntime, type Runtime } from "mcporter";
+import { registerInlineServers } from "./inline-servers.js";
 import { attachSecretEnvToRuntime } from "./secret-env.js";
-import type { McporterServerSettings } from "./settings.js";
+import {
+  resolveMcporterSettingsPath,
+  type McporterServerSettings,
+} from "./settings.js";
 
 type RuntimeSessionServerSettings = Record<string, McporterServerSettings>;
 
@@ -16,6 +21,7 @@ export type RuntimeSessionOptions = {
   getRuntimeServerSettings?: () => Promise<
     RuntimeSessionServerSettings | undefined
   >;
+  getSettingsPath?: () => Promise<string | undefined>;
   packageVersion: string;
 };
 
@@ -25,6 +31,7 @@ export class RuntimeSession {
   private readonly getRuntimeServerSettings: () => Promise<
     RuntimeSessionServerSettings | undefined
   >;
+  private readonly getSettingsPath: () => Promise<string | undefined>;
   private readonly packageVersion: string;
 
   private generation = 0;
@@ -36,6 +43,7 @@ export class RuntimeSession {
     this.getRuntimeConfigPath = options.getRuntimeConfigPath;
     this.getRuntimeServerSettings =
       options.getRuntimeServerSettings ?? (async () => undefined);
+    this.getSettingsPath = options.getSettingsPath ?? (async () => undefined);
     this.packageVersion = options.packageVersion;
   }
 
@@ -50,8 +58,9 @@ export class RuntimeSession {
       promise = Promise.all([
         this.getRuntimeConfigPath(),
         this.getRuntimeServerSettings(),
+        this.getSettingsPath(),
       ])
-        .then(async ([configPath, mcpServers]) => {
+        .then(async ([configPath, mcpServers, settingsPath]) => {
           this.throwIfStale(generation);
           const runtime = await this.createRuntimeFn({
             ...(configPath ? { configPath } : {}),
@@ -60,6 +69,11 @@ export class RuntimeSession {
               version: this.packageVersion,
             },
           });
+          registerInlineServers(
+            runtime,
+            mcpServers,
+            dirname(settingsPath ?? resolveMcporterSettingsPath()),
+          );
           attachSecretEnvToRuntime(runtime, mcpServers);
           return runtime;
         })

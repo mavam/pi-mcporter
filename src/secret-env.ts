@@ -64,7 +64,7 @@ export function attachSecretEnvToRuntime(
   }
 }
 
-function resolveConfigValue(value: string, description: string): string {
+export function resolveConfigValue(value: string, description: string): string {
   if (value.startsWith("!")) {
     return executeSecretCommand(value.slice(1), description);
   }

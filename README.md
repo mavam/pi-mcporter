@@ -180,13 +180,44 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
 
 - `MCPORTER_CONFIG=/absolute/path/to/mcporter.json` still overrides `configPath` from the settings file.
 - `configPath`: optional explicit MCPorter config path. If omitted, MCPorter uses its normal default resolution.
-- `mcpServers`: optional Pi-only overlay keyed by MCPorter server name.
+- `mcpServers`: optional Pi-only settings keyed by MCPorter server name. Entries either overlay a server from the MCPorter config or define one inline (see below).
   - `mcpServers.<name>.env`: environment variables for that server only. Values are literals by default; values starting with `!` execute as shell commands and use stdout, matching pi's command-backed secret style; values exactly matching `$env:VAR` or `${VAR}` read from the current process environment.
   - `mcpServers.<name>.mode`: per-server mode override (`lazy`, `index`, or `preload`). Takes precedence over the top-level `mode` for that server.
 - `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
 - `mode`: optional default catalog visibility mode (`lazy`, `index`, or `preload`, default `index`) for servers without a per-server override. See [Modes & context preloading](#-modes--context-preloading).
 
-For example, keep `~/.mcporter/mcporter.json` secret-free:
+### Inline server definitions
+
+You can also define servers entirely in `~/.pi/agent/mcporter.json`, without touching the MCPorter config. An entry that sets `command` (stdio) or `url` (HTTP) becomes a full server definition:
+
+```json
+{
+  "mcpServers": {
+    "everything": {
+      "command": "npx -y @modelcontextprotocol/server-everything"
+    },
+    "excalidraw": {
+      "url": "https://api.excalidraw.com/api/v1/mcp",
+      "headers": {
+        "Authorization": "!security find-generic-password -s 'excalidraw-api-key' -w"
+      },
+      "mode": "preload"
+    }
+  }
+}
+```
+
+Inline fields:
+
+- `command`: stdio launch command, either a single string (tokenized shell-style) or an array of `[command, ...args]`.
+- `args`: explicit argument list for a string `command`; skips tokenization.
+- `cwd`: working directory for stdio servers (`~` expands to your home directory). Defaults to the settings file's directory.
+- `url`: HTTP(S) endpoint of a remote MCP server. If both `url` and `command` are set, `url` wins.
+- `headers`: HTTP headers; values support the same secret syntax as `env` (`!command`, `$env:VAR`, `${VAR}`), which makes bearer tokens easy.
+
+Inline definitions compose with the MCPorter config: servers from both are available, and on a name collision the inline definition takes precedence. The `env` and `mode` settings apply to inline servers exactly as they do to overlaid ones.
+
+Alternatively, keep the server in `~/.mcporter/mcporter.json` secret-free:
 
 ```json
 {

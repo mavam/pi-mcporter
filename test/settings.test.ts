@@ -96,6 +96,45 @@ describe("mcporter settings", () => {
     });
   });
 
+  it("keeps inline server definitions", () => {
+    expect(
+      normalizeMcporterSettings({
+        mcpServers: {
+          stdio: { command: "npx -y demo-server", cwd: " /srv " },
+          stdioArray: { command: ["npx", "-y", "demo-server"] },
+          http: {
+            url: "https://example.com/mcp",
+            headers: { Authorization: "Bearer token" },
+          },
+        },
+      }).mcpServers,
+    ).toEqual({
+      stdio: { command: "npx -y demo-server", cwd: "/srv" },
+      stdioArray: { command: ["npx", "-y", "demo-server"] },
+      http: {
+        url: "https://example.com/mcp",
+        headers: { Authorization: "Bearer token" },
+      },
+    });
+  });
+
+  it("drops malformed inline fields and field-only entries", () => {
+    expect(
+      normalizeMcporterSettings({
+        mcpServers: {
+          demo: {
+            command: ["npx", 42],
+            url: "   ",
+            mode: "preload",
+          },
+          headersOnly: { headers: { Authorization: "Bearer token" } },
+        },
+      }).mcpServers,
+    ).toEqual({
+      demo: { mode: "preload" },
+    });
+  });
+
   it("drops invalid per-server modes so the global mode applies", () => {
     expect(
       normalizeMcporterSettings({
