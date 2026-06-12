@@ -1,0 +1,11 @@
+created: 2026-06-12
+title: Inline MCP server definitions and context modes
+intro: >-
+  This release makes Pi MCPorter easier to configure by letting agents discover MCP
+  servers from lightweight index entries, preload selected server catalogs, and define
+  pi-only MCP servers directly in the agent configuration. It reduces startup friction
+  while preserving lazy loading and secret-backed server definitions for larger MCP
+  setups.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.4.0
