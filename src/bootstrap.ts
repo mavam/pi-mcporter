@@ -34,6 +34,7 @@ export function createMcporterController(
       (await ensureResolvedConfig()).runtimeConfigPath,
     getRuntimeServerSettings: async () =>
       (await ensureResolvedConfig()).mcpServers,
+    getSettingsPath: async () => (await ensureResolvedConfig()).settingsPath,
     packageVersion: options.packageVersion,
   });
   const promptCatalogProvider = new PromptCatalogProvider(

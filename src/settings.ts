@@ -11,8 +11,13 @@ import {
 } from "./mode.js";
 
 export type McporterServerSettings = {
+  args?: string[];
+  command?: string | string[];
+  cwd?: string;
   env?: Record<string, string>;
+  headers?: Record<string, string>;
   mode?: McporterMode;
+  url?: string;
 };
 
 export type McporterSettings = {
@@ -156,19 +161,32 @@ function normalizeMcpServers(
       return [];
     }
 
-    const env = normalizeServerEnv(rawSettings.env);
+    const args = normalizeStringArray(rawSettings.args);
+    const command = normalizeCommand(rawSettings.command);
+    const cwd = normalizeNonEmptyString(rawSettings.cwd);
+    const env = normalizeStringRecord(rawSettings.env);
+    const headers = normalizeStringRecord(rawSettings.headers);
+    const url = normalizeNonEmptyString(rawSettings.url);
     const mode =
       typeof rawSettings.mode === "string"
         ? parseMcporterMode(rawSettings.mode)
         : undefined;
-    if (!env && !mode) {
+    if (!env && !mode && !command && !url) {
       return [];
     }
 
     return [
       [
         serverName,
-        { ...(env ? { env } : {}), ...(mode ? { mode } : {}) },
+        {
+          ...(args ? { args } : {}),
+          ...(command ? { command } : {}),
+          ...(cwd ? { cwd } : {}),
+          ...(env ? { env } : {}),
+          ...(headers ? { headers } : {}),
+          ...(mode ? { mode } : {}),
+          ...(url ? { url } : {}),
+        },
       ] as const,
     ];
   });
@@ -176,7 +194,32 @@ function normalizeMcpServers(
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function normalizeServerEnv(
+function normalizeCommand(value: unknown): string | string[] | undefined {
+  if (Array.isArray(value)) {
+    return normalizeStringArray(value);
+  }
+  return normalizeNonEmptyString(value);
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  if (!value.every((entry) => typeof entry === "string")) {
+    return undefined;
+  }
+  return value.length > 0 ? value : undefined;
+}
+
+function normalizeNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeStringRecord(
   value: unknown,
 ): Record<string, string> | undefined {
   if (!isPlainObject(value)) {
