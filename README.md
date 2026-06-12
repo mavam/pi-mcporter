@@ -45,7 +45,7 @@ npx mcporter list
 pi
 ```
 
-3. Ask for what you need — pi picks the right MCP tools automatically:
+3. Ask for what you need and pi picks the right MCP tools automatically:
 
 - `What are my open Linear issues this sprint?`
 - `Catch me up on #engineering in Slack from today.`
@@ -55,7 +55,7 @@ pi
 
 The `mcporter` tool has three actions that map to a natural discovery → execution workflow.
 
-### `search` — find tools by keyword
+### `search`: find tools by keyword
 
 Use when you don't know the exact server or tool name.
 
@@ -70,7 +70,7 @@ linear.create_issue — Create a new issue in a Linear team
 linear.list_issues  — List issues matching a filter
 ```
 
-### `describe` — get the full schema for a tool
+### `describe`: get the full schema for a tool
 
 Use when you know the selector but need to see its required parameters before calling.
 
@@ -80,7 +80,7 @@ Use when you know the selector but need to see its required parameters before ca
 
 Returns the full JSON Schema for the tool's input, including required vs. optional fields and their types.
 
-### `call` — invoke a tool
+### `call`: invoke a tool
 
 Use once you know the selector and its schema.
 
@@ -102,7 +102,47 @@ describe linear.create_issue   →  learn required fields: title, teamId
 call linear.create_issue       →  execute with those fields
 ```
 
-In practice pi follows this pattern automatically. With `mode: "preload"` the catalog is already warm at agent start, so pi can often skip `search`/`describe` and jump straight to `call`.
+In practice pi follows this pattern automatically. With `mode: "preload"` the catalog is warmed in the background, so pi can often skip `search`/`describe` and jump straight to `call`.
+
+## 🔥 Modes & context preloading
+
+The `mode` setting controls what the agent already knows about your MCP servers at the start of each turn. In every mode only the single `mcporter` tool is exposed; the mode only changes how much catalog metadata lands in the system prompt:
+
+- `index` (default): appends a single line listing the reachable MCP server names. This costs a handful of tokens and tells the agent what exists, so it knows when reaching for `mcporter` is worth a `search`.
+- `lazy`: zero impact. Nothing is added to the context, and no runtime is created at startup; the agent discovers servers and tools entirely on demand. Configure this when you want pi-mcporter invisible until used.
+- `preload`: additionally syncs the server's tool catalog in the background and appends a compact "warmed selectors" block to the system prompt, with one line per tool (selector plus short description, capped at 40 entries across all preloaded servers). The agent can usually skip discovery and `call` directly. The sync never blocks the agent: on the very first turn the server still appears as a plain index entry, and the warmed selectors show up once the background sync completes.
+
+Side by side, here is what the agent sees and does for the same request:
+
+```
+mode: "index" (default)               mode: "preload"
+────────────────────────────────────  ────────────────────────────────────
+system prompt:                        system prompt:
+  MCP servers are reachable through     Warmed MCP selectors:
+  the mcporter tool: linear, slack.     - linear.create_issue — Create a…
+                                        - linear.list_issues — List issu…
+
+1. search "linear issue"              1. call linear.create_issue
+2. describe linear.create_issue
+3. call linear.create_issue
+```
+
+With `lazy` even the index line disappears: the agent has no idea which MCP servers exist until it tries `search`.
+
+The trade-off: `index` buys discoverability for a handful of tokens; `preload` spends system-prompt tokens on the selector list to save discovery round-trips on every request; `lazy` keeps the context untouched.
+
+`mode` can be set globally and overridden per server via `mcpServers.<name>.mode`. A good pattern is to preload the one or two servers you use constantly and hide noisy ones:
+
+```json
+{
+  "mcpServers": {
+    "linear": { "mode": "preload" },
+    "playwright": { "mode": "lazy" }
+  }
+}
+```
+
+With this config Linear's tools appear as warmed selectors, playwright stays invisible until used, and every other server shows up in the one-line server index.
 
 ## 🧰 Tool input (reference)
 
@@ -124,12 +164,15 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
 {
   "configPath": "/absolute/path/to/mcporter.json",
   "timeoutMs": 30000,
-  "mode": "lazy",
+  "mode": "index",
   "mcpServers": {
     "excalidraw": {
       "env": {
         "EXCALIDRAW_API_KEY": "!security find-generic-password -s 'excalidraw-api-key' -w"
       }
+    },
+    "linear": {
+      "mode": "preload"
     }
   }
 }
@@ -137,12 +180,11 @@ Configure the extension in `~/.pi/agent/mcporter.json`:
 
 - `MCPORTER_CONFIG=/absolute/path/to/mcporter.json` still overrides `configPath` from the settings file.
 - `configPath`: optional explicit MCPorter config path. If omitted, MCPorter uses its normal default resolution.
-- `mcpServers`: optional Pi-only overlay keyed by MCPorter server name. Currently supports per-server `env` values that Pi injects into the matching MCP server definition at runtime.
+- `mcpServers`: optional Pi-only overlay keyed by MCPorter server name.
   - `mcpServers.<name>.env`: environment variables for that server only. Values are literals by default; values starting with `!` execute as shell commands and use stdout, matching pi's command-backed secret style; values exactly matching `$env:VAR` or `${VAR}` read from the current process environment.
+  - `mcpServers.<name>.mode`: per-server mode override (`lazy`, `index`, or `preload`). Takes precedence over the top-level `mode` for that server.
 - `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
-- `mode`: optional default MCP tool visibility mode.
-  - `lazy`: only the stable `mcporter` proxy tool is visible and MCP metadata loads on demand
-  - `preload`: still only exposes `mcporter`, but preloads MCP tool metadata before agent start so the agent can skip unnecessary discovery more often
+- `mode`: optional default catalog visibility mode (`lazy`, `index`, or `preload`, default `index`) for servers without a per-server override. See [Modes & context preloading](#-modes--context-preloading).
 
 For example, keep `~/.mcporter/mcporter.json` secret-free:
 

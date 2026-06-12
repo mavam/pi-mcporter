@@ -11,8 +11,11 @@ export interface PreloadSummary {
 export async function preloadCatalog(
   activeRuntime: Runtime,
   catalogStore: CatalogStore,
+  serverFilter?: (server: string) => boolean,
 ): Promise<PreloadSummary> {
-  const servers = activeRuntime.listServers();
+  const servers = activeRuntime
+    .listServers()
+    .filter((server) => serverFilter?.(server) ?? true);
   const warnings: string[] = [];
   const warmedServers: string[] = [];
 

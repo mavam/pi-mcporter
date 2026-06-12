@@ -4,6 +4,32 @@ import type { CatalogTool } from "./types.js";
 const MAX_PRELOADED_PROMPT_TOOLS = 40;
 const MAX_PRELOADED_DESCRIPTION_LENGTH = 140;
 
+export function buildMcporterSystemPromptAppend(input: {
+  warmedTools: CatalogTool[];
+  indexServers: string[];
+}): string | undefined {
+  const warmed = buildCatalogSystemPromptAppend(input.warmedTools);
+  const index = buildServerIndexAppend(input.indexServers, Boolean(warmed));
+  if (warmed && index) {
+    return `${warmed}\n${index}`;
+  }
+  return warmed ?? index;
+}
+
+function buildServerIndexAppend(
+  servers: string[],
+  hasWarmedTools: boolean,
+): string | undefined {
+  if (servers.length === 0) {
+    return undefined;
+  }
+
+  const list = [...servers].sort((a, b) => a.localeCompare(b)).join(", ");
+  return hasWarmedTools
+    ? `Additional MCP servers reachable through \`mcporter\` (catalog not yet warmed): ${list}. Use action='search' to discover their tools.`
+    : `MCP servers are reachable through the \`mcporter\` tool: ${list}. Use action='search' to discover their tools before calling.`;
+}
+
 export function buildCatalogSystemPromptAppend(
   tools: CatalogTool[],
 ): string | undefined {

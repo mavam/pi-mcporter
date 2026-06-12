@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CatalogService } from "./catalog-service.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
-import { shouldPreloadCatalog } from "./mode.js";
+import { resolveServerMode } from "./mode.js";
 import { PromptCatalogProvider } from "./prompt-catalog-provider.js";
 import {
   getDefaultMcporterSettings,
@@ -75,11 +75,18 @@ export function createMcporterController(
   async function buildSystemPromptAppend(): Promise<string | undefined> {
     try {
       const config = await ensureResolvedConfig();
-      if (!shouldPreloadCatalog(config.mode)) {
+      const anyVisible =
+        config.mode !== "lazy" ||
+        Object.values(config.mcpServers ?? {}).some(
+          (server) => server.mode && server.mode !== "lazy",
+        );
+      if (!anyVisible) {
         return undefined;
       }
 
-      return await promptCatalogProvider.buildSystemPromptAppend();
+      return await promptCatalogProvider.buildSystemPromptAppend((server) =>
+        resolveServerMode(config.mode, config.mcpServers?.[server]),
+      );
     } catch {
       return undefined;
     }

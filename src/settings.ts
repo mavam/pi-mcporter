@@ -4,10 +4,15 @@ import { join } from "node:path";
 import { DEFAULT_CALL_TIMEOUT_MS } from "./constants.js";
 import { isPlainObject, toErrorMessage } from "./helpers.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
-import { resolveMcporterMode, type McporterMode } from "./mode.js";
+import {
+  parseMcporterMode,
+  resolveMcporterMode,
+  type McporterMode,
+} from "./mode.js";
 
 export type McporterServerSettings = {
   env?: Record<string, string>;
+  mode?: McporterMode;
 };
 
 export type McporterSettings = {
@@ -30,7 +35,7 @@ type SettingsLoaderOptions = {
 
 export function getDefaultMcporterSettings(): McporterSettings {
   return {
-    mode: "lazy",
+    mode: "index",
     timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
   };
 }
@@ -152,11 +157,20 @@ function normalizeMcpServers(
     }
 
     const env = normalizeServerEnv(rawSettings.env);
-    if (!env) {
+    const mode =
+      typeof rawSettings.mode === "string"
+        ? parseMcporterMode(rawSettings.mode)
+        : undefined;
+    if (!env && !mode) {
       return [];
     }
 
-    return [[serverName, { env }] as const];
+    return [
+      [
+        serverName,
+        { ...(env ? { env } : {}), ...(mode ? { mode } : {}) },
+      ] as const,
+    ];
   });
 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
