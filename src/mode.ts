@@ -1,4 +1,4 @@
-export const MCPORTER_MODES = ["lazy", "preload"] as const;
+export const MCPORTER_MODES = ["lazy", "index", "preload"] as const;
 
 export type McporterMode = (typeof MCPORTER_MODES)[number];
 
@@ -10,15 +10,18 @@ export function parseMcporterMode(
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === "lazy" || normalized === "preload") {
-    return normalized;
-  }
-
-  return undefined;
+  return MCPORTER_MODES.find((mode) => mode === normalized);
 }
 
 export function resolveMcporterMode(value: string | undefined): McporterMode {
-  return parseMcporterMode(value) ?? "lazy";
+  return parseMcporterMode(value) ?? "index";
+}
+
+export function resolveServerMode(
+  globalMode: McporterMode,
+  serverSettings?: { mode?: McporterMode },
+): McporterMode {
+  return serverSettings?.mode ?? globalMode;
 }
 
 export function shouldPreloadCatalog(mode: McporterMode): boolean {

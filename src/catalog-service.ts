@@ -6,18 +6,19 @@ import type { CatalogTool } from "./types.js";
 export class CatalogService {
   constructor(readonly store: CatalogStore = new CatalogStore()) {}
 
-  async ensurePromptCatalog(runtime: Runtime): Promise<CatalogTool[]> {
-    await preloadCatalog(runtime, this.store);
-
-    const tools: CatalogTool[] = [];
-    for (const server of runtime.listServers()) {
-      const cachedTools = this.store.getCachedToolsForServer(server);
-      if (cachedTools) {
-        tools.push(...cachedTools);
-      }
+  startBackgroundSync(runtime: Runtime, servers: string[]): void {
+    if (servers.length === 0) {
+      return;
     }
 
-    return tools;
+    const serverSet = new Set(servers);
+    void preloadCatalog(runtime, this.store, (server) =>
+      serverSet.has(server),
+    ).catch(() => {});
+  }
+
+  getWarmedTools(server: string): CatalogTool[] | undefined {
+    return this.store.getCachedToolsForServer(server);
   }
 
   clear(): void {

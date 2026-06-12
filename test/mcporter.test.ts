@@ -395,16 +395,32 @@ describe("call args preview formatting", () => {
 });
 
 describe("mode resolution", () => {
-  it("defaults to lazy", () => {
-    expect(__test__.resolveMcporterMode(undefined)).toBe("lazy");
+  it("defaults to index", () => {
+    expect(__test__.resolveMcporterMode(undefined)).toBe("index");
   });
 
-  it("accepts preload", () => {
+  it("accepts lazy, index, and preload", () => {
+    expect(__test__.resolveMcporterMode("lazy")).toBe("lazy");
+    expect(__test__.resolveMcporterMode("index")).toBe("index");
     expect(__test__.resolveMcporterMode("preload")).toBe("preload");
   });
 
-  it("falls back to lazy for unknown values", () => {
-    expect(__test__.resolveMcporterMode("surprise")).toBe("lazy");
+  it("falls back to index for unknown values", () => {
+    expect(__test__.resolveMcporterMode("surprise")).toBe("index");
+  });
+
+  it("prefers the per-server mode over the global mode", () => {
+    expect(__test__.resolveServerMode("lazy", { mode: "preload" })).toBe(
+      "preload",
+    );
+    expect(__test__.resolveServerMode("preload", { mode: "lazy" })).toBe(
+      "lazy",
+    );
+  });
+
+  it("falls back to the global mode without a per-server override", () => {
+    expect(__test__.resolveServerMode("preload", undefined)).toBe("preload");
+    expect(__test__.resolveServerMode("lazy", {})).toBe("lazy");
   });
 });
 

@@ -61,6 +61,7 @@ describe("mcporter settings", () => {
                 "!security find-generic-password -s excalidraw-api-key -w",
               IGNORED: 42,
             },
+            mode: "PRELOAD",
           },
           ignored: 42,
         },
@@ -75,9 +76,41 @@ describe("mcporter settings", () => {
             EXCALIDRAW_API_KEY:
               "!security find-generic-password -s excalidraw-api-key -w",
           },
+          mode: "preload",
         },
       },
       timeoutMs: 45_000,
+      mode: "preload",
+    });
+  });
+
+  it("keeps server entries that only set a mode", () => {
+    expect(
+      normalizeMcporterSettings({
+        mcpServers: {
+          linear: { mode: "preload" },
+        },
+      }).mcpServers,
+    ).toEqual({
+      linear: { mode: "preload" },
+    });
+  });
+
+  it("drops invalid per-server modes so the global mode applies", () => {
+    expect(
+      normalizeMcporterSettings({
+        mcpServers: {
+          linear: { mode: "surprise" },
+          slack: { env: { TOKEN: "literal" }, mode: "surprise" },
+        },
+        mode: "preload",
+      }),
+    ).toEqual({
+      configPath: undefined,
+      mcpServers: {
+        slack: { env: { TOKEN: "literal" } },
+      },
+      timeoutMs: 30_000,
       mode: "preload",
     });
   });
@@ -92,7 +125,7 @@ describe("mcporter settings", () => {
     ).toEqual({
       configPath: undefined,
       timeoutMs: 30_000,
-      mode: "lazy",
+      mode: "index",
     });
   });
 
@@ -162,7 +195,7 @@ describe("mcporter settings", () => {
       runtimeConfigPath: "/env/mcporter.json",
       settingsPath: "/home/tester/.pi/agent/mcporter.json",
       timeoutMs: 30_000,
-      mode: "lazy",
+      mode: "index",
     });
   });
 });

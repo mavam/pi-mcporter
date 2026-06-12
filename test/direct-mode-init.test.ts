@@ -42,9 +42,16 @@ describe("extension startup modes", () => {
     vi.doMock("mcporter", () => ({ createRuntime }));
 
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
     const previousHome = process.env.HOME;
     let beforeAgentStart: (() => Promise<void>) | undefined;
     process.env.HOME = homeDirectory;
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      join(settingsDirectory, "mcporter.json"),
+      JSON.stringify({ mode: "lazy" }),
+      "utf8",
+    );
 
     try {
       const { default: mcporterExtension } = await import("../src/index.ts");
@@ -62,6 +69,140 @@ describe("extension startup modes", () => {
 
       await expect(beforeAgentStart?.()).resolves.toBeUndefined();
       expect(createRuntime).not.toHaveBeenCalled();
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("appends a server index by default without fetching tool catalogs", async () => {
+    vi.resetModules();
+
+    const listTools = vi.fn<Runtime["listTools"]>();
+    const runtime = createRuntimeStub(listTools, ["alpha", "beta"]);
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const previousHome = process.env.HOME;
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+      const pi = createExtensionPiStub();
+
+      await mcporterExtension(pi.api);
+
+      const result = await pi.beforeAgentStart({
+        prompt: "show me my items",
+        images: [],
+        systemPrompt: "Base system prompt",
+      });
+
+      expect(listTools).not.toHaveBeenCalled();
+      const systemPrompt = (result as { systemPrompt: string }).systemPrompt;
+      expect(systemPrompt).toContain(
+        "MCP servers are reachable through the `mcporter` tool: alpha, beta.",
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("injects nothing when the runtime has no servers", async () => {
+    vi.resetModules();
+
+    const listTools = vi.fn<Runtime["listTools"]>();
+    const runtime = createRuntimeStub(listTools, []);
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const previousHome = process.env.HOME;
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+      const pi = createExtensionPiStub();
+
+      await mcporterExtension(pi.api);
+
+      await expect(
+        pi.beforeAgentStart({
+          prompt: "show me my items",
+          images: [],
+          systemPrompt: "Base system prompt",
+        }),
+      ).resolves.toBeUndefined();
+      expect(listTools).not.toHaveBeenCalled();
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("injects nothing when every server resolves to lazy mode", async () => {
+    vi.resetModules();
+
+    const listTools = vi.fn<Runtime["listTools"]>();
+    const runtime = createRuntimeStub(listTools, ["alpha"]);
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const previousHome = process.env.HOME;
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      join(settingsDirectory, "mcporter.json"),
+      JSON.stringify({
+        mode: "index",
+        mcpServers: { alpha: { mode: "lazy" } },
+      }),
+      "utf8",
+    );
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+      const pi = createExtensionPiStub();
+
+      await mcporterExtension(pi.api);
+
+      await expect(
+        pi.beforeAgentStart({
+          prompt: "show me my items",
+          images: [],
+          systemPrompt: "Base system prompt",
+        }),
+      ).resolves.toBeUndefined();
+      expect(listTools).not.toHaveBeenCalled();
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
@@ -104,6 +245,21 @@ describe("extension startup modes", () => {
 
       await mcporterExtension(pi.api);
 
+      const firstTurn = await pi.beforeAgentStart({
+        prompt: "show me my items",
+        images: [],
+        systemPrompt: "Base system prompt",
+      });
+
+      expect((firstTurn as { systemPrompt: string }).systemPrompt).toContain(
+        "MCP servers are reachable through the `mcporter` tool: alpha.",
+      );
+
+      await vi.waitFor(() => {
+        expect(listTools).toHaveBeenCalledTimes(1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
       const result = await pi.beforeAgentStart({
         prompt: "show me my items",
         images: [],
@@ -125,6 +281,152 @@ describe("extension startup modes", () => {
       expect((result as { systemPrompt: string }).systemPrompt).toContain(
         "action='call' directly",
       );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("preloads only servers with a per-server preload mode in global lazy mode", async () => {
+    vi.resetModules();
+
+    const listTools = vi
+      .fn<Runtime["listTools"]>()
+      .mockImplementation(async (server) => [demoTool(server, "list_items")]);
+    const runtime = createRuntimeStub(listTools, ["alpha", "beta"]);
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        mode: "lazy",
+        mcpServers: { beta: { mode: "preload" } },
+      }),
+      "utf8",
+    );
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+      const pi = createExtensionPiStub();
+
+      await mcporterExtension(pi.api);
+
+      const firstTurn = await pi.beforeAgentStart({
+        prompt: "show me my items",
+        images: [],
+        systemPrompt: "Base system prompt",
+      });
+      const firstPrompt = (firstTurn as { systemPrompt: string }).systemPrompt;
+      expect(firstPrompt).toContain(
+        "MCP servers are reachable through the `mcporter` tool: beta.",
+      );
+      expect(firstPrompt).not.toContain("alpha");
+
+      await vi.waitFor(() => {
+        expect(listTools).toHaveBeenCalledTimes(1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const result = await pi.beforeAgentStart({
+        prompt: "show me my items",
+        images: [],
+        systemPrompt: "Base system prompt",
+      });
+
+      expect(listTools).toHaveBeenCalledTimes(1);
+      expect(listTools).toHaveBeenCalledWith("beta", expect.anything());
+      const systemPrompt = (result as { systemPrompt: string }).systemPrompt;
+      expect(systemPrompt).toContain("beta.list_items");
+      expect(systemPrompt).not.toContain("alpha.list_items");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      vi.doUnmock("mcporter");
+      vi.resetModules();
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes servers with a per-server lazy mode in global preload mode", async () => {
+    vi.resetModules();
+
+    const listTools = vi
+      .fn<Runtime["listTools"]>()
+      .mockImplementation(async (server) => [demoTool(server, "list_items")]);
+    const runtime = createRuntimeStub(listTools, ["alpha", "beta"]);
+    vi.doMock("mcporter", () => ({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    }));
+
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const settingsPath = join(settingsDirectory, "mcporter.json");
+    const previousHome = process.env.HOME;
+
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        mode: "preload",
+        mcpServers: { beta: { mode: "lazy" } },
+      }),
+      "utf8",
+    );
+    process.env.HOME = homeDirectory;
+
+    try {
+      const { default: mcporterExtension } = await import("../src/index.ts");
+      const pi = createExtensionPiStub();
+
+      await mcporterExtension(pi.api);
+
+      const firstTurn = await pi.beforeAgentStart({
+        prompt: "show me my items",
+        images: [],
+        systemPrompt: "Base system prompt",
+      });
+      const firstPrompt = (firstTurn as { systemPrompt: string }).systemPrompt;
+      expect(firstPrompt).toContain(
+        "MCP servers are reachable through the `mcporter` tool: alpha.",
+      );
+      expect(firstPrompt).not.toContain("beta");
+
+      await vi.waitFor(() => {
+        expect(listTools).toHaveBeenCalledTimes(1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const result = await pi.beforeAgentStart({
+        prompt: "show me my items",
+        images: [],
+        systemPrompt: "Base system prompt",
+      });
+
+      expect(listTools).toHaveBeenCalledTimes(1);
+      expect(listTools).toHaveBeenCalledWith("alpha", expect.anything());
+      const systemPrompt = (result as { systemPrompt: string }).systemPrompt;
+      expect(systemPrompt).toContain("alpha.list_items");
+      expect(systemPrompt).not.toContain("beta.list_items");
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;

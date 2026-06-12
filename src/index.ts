@@ -26,7 +26,7 @@ import {
   parseSelector,
   resolveCallTimeoutFromInputs,
 } from "./inputs.js";
-import { resolveMcporterMode } from "./mode.js";
+import { resolveMcporterMode, resolveServerMode } from "./mode.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
 import type { ToolDetails } from "./types.js";
@@ -317,6 +317,7 @@ export const __test__ = {
   rankTools,
   resolveCallTimeoutFromInputs,
   resolveMcporterMode,
+  resolveServerMode,
   scoreTool,
   suggest,
 };

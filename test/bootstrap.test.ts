@@ -48,11 +48,18 @@ describe("createMcporterController", () => {
     }
   });
 
-  it("does not create a runtime when prompt preloading is disabled", async () => {
+  it("does not create a runtime in lazy mode", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
     const previousHome = process.env.HOME;
     const createRuntimeFn = vi.fn();
     process.env.HOME = homeDirectory;
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      join(settingsDirectory, "mcporter.json"),
+      JSON.stringify({ mode: "lazy" }),
+      "utf8",
+    );
 
     try {
       const controller = createMcporterController({} as never, {
@@ -252,12 +259,14 @@ describe("createMcporterController", () => {
         packageVersion: "1.0.0",
       });
 
-      await expect(
-        controller.buildSystemPromptAppend(),
-      ).resolves.toBeUndefined();
       await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-        "alpha.lookup",
+        "MCP servers are reachable",
       );
+      await vi.waitFor(async () => {
+        await expect(controller.buildSystemPromptAppend()).resolves.toContain(
+          "alpha.lookup",
+        );
+      });
       expect(attempts).toBe(2);
     } finally {
       if (previousHome === undefined) {
@@ -295,8 +304,9 @@ describe("createMcporterController", () => {
       });
 
       await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-        "alpha.legacy_lookup",
+        "MCP servers are reachable",
       );
+      await vi.advanceTimersByTimeAsync(0);
       await expect(controller.buildSystemPromptAppend()).resolves.toContain(
         "alpha.legacy_lookup",
       );
@@ -304,6 +314,10 @@ describe("createMcporterController", () => {
 
       vi.advanceTimersByTime(CATALOG_TTL_MS + 1);
 
+      await expect(controller.buildSystemPromptAppend()).resolves.toContain(
+        "MCP servers are reachable",
+      );
+      await vi.advanceTimersByTimeAsync(0);
       await expect(controller.buildSystemPromptAppend()).resolves.toContain(
         "alpha.fresh_lookup",
       );
