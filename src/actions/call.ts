@@ -25,7 +25,7 @@ export async function handleCallAction(
   params: McporterParams,
   signal: AbortSignal | undefined,
   catalogStore: CatalogStore,
-  resolveCallTimeout: (override?: number) => number,
+  resolveCallTimeout: (override?: number) => number | Promise<number>,
 ) {
   const parsed = parseSelector(params.selector);
   if ("error" in parsed) {
@@ -42,7 +42,7 @@ export async function handleCallAction(
     throw new Error(argsResult.error);
   }
 
-  const timeoutMs = resolveCallTimeout(params.timeoutMs);
+  const timeoutMs = await resolveCallTimeout(params.timeoutMs);
   const cachedKnownTools = catalogStore.getCachedToolsForServer(parsed.server);
   if (
     cachedKnownTools &&

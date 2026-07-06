@@ -1,12 +1,9 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
 import { createMcporterController } from "../src/bootstrap.ts";
-import { CatalogService } from "../src/catalog-service.ts";
-import { CatalogStore } from "../src/catalog-store.ts";
-import { CATALOG_TTL_MS } from "../src/constants.ts";
 
 describe("createMcporterController", () => {
   it("closes runtimes that finish creating after shutdown", async () => {
@@ -28,7 +25,7 @@ describe("createMcporterController", () => {
         packageVersion: "1.0.0",
       });
 
-      const runtimePromise = controller.ensureRuntime();
+      const runtimePromise = controller.ensureRuntime("/repo");
       await vi.waitFor(() => {
         expect(createRuntimeFn).toHaveBeenCalledTimes(1);
       });
@@ -68,7 +65,7 @@ describe("createMcporterController", () => {
       });
 
       await expect(
-        controller.buildSystemPromptAppend(),
+        controller.buildSystemPromptAppend("/repo"),
       ).resolves.toBeUndefined();
       expect(createRuntimeFn).not.toHaveBeenCalled();
     } finally {
@@ -82,29 +79,79 @@ describe("createMcporterController", () => {
     }
   });
 
-  it("attaches configured command-backed env only to the matching runtime definition", async () => {
+  it("loads call timeout settings even when no prompt orchestration ran", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
     const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const settingsPath = join(settingsDirectory, "mcporter.json");
     const previousHome = process.env.HOME;
-    const previousToken = process.env.EXCALIDRAW_API_KEY;
-    const runtime = createRuntimeStub(undefined, ["excalidraw", "unrelated"]);
+    process.env.HOME = homeDirectory;
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(
+      join(settingsDirectory, "mcporter.json"),
+      JSON.stringify({ timeoutMs: 45_000 }),
+      "utf8",
+    );
+
+    try {
+      const controller = createMcporterController({} as never, {
+        createRuntimeFn: vi
+          .fn()
+          .mockResolvedValue(createRuntimeStub()) as never,
+        packageVersion: "1.0.0",
+      });
+
+      await expect(controller.resolveCallTimeout()).resolves.toBe(45_000);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the default call timeout when pi settings are malformed", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const previousHome = process.env.HOME;
+    process.env.HOME = homeDirectory;
+    await mkdir(settingsDirectory, { recursive: true });
+    await writeFile(join(settingsDirectory, "mcporter.json"), "{", "utf8");
+
+    try {
+      const controller = createMcporterController({} as never, {
+        createRuntimeFn: vi
+          .fn()
+          .mockResolvedValue(createRuntimeStub()) as never,
+        packageVersion: "1.0.0",
+      });
+
+      await expect(controller.resolveCallTimeout()).resolves.toBe(30_000);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+
+      await rm(homeDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("delegates MCPorter config resolution to mcporter", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
+    const settingsDirectory = join(homeDirectory, ".pi", "agent");
+    const previousHome = process.env.HOME;
+    const previousConfig = process.env.MCPORTER_CONFIG;
+    const runtime = createRuntimeStub(undefined, ["demo"]);
     const createRuntimeFn = vi.fn().mockResolvedValue(runtime);
     process.env.HOME = homeDirectory;
-    delete process.env.EXCALIDRAW_API_KEY;
+    process.env.MCPORTER_CONFIG = "/env/mcporter.json";
     await mkdir(settingsDirectory, { recursive: true });
     await writeFile(
-      settingsPath,
-      JSON.stringify({
-        mcpServers: {
-          excalidraw: {
-            env: {
-              EXCALIDRAW_API_KEY:
-                "!node -e \"process.stdout.write('command-token\\n')\"",
-            },
-          },
-        },
-      }),
+      join(settingsDirectory, "mcporter.json"),
+      JSON.stringify({ configPath: "/ignored/by/pi-mcporter.json" }),
       "utf8",
     );
 
@@ -114,49 +161,75 @@ describe("createMcporterController", () => {
         packageVersion: "1.0.0",
       });
 
-      await expect(controller.ensureRuntime()).resolves.toBe(runtime);
-      expect(createRuntimeFn).toHaveBeenCalledTimes(1);
-      expect(process.env.EXCALIDRAW_API_KEY).toBeUndefined();
-      expect(runtime.getDefinition("excalidraw").env).toEqual({
-        EXCALIDRAW_API_KEY: "command-token",
+      await expect(controller.ensureRuntime("/repo")).resolves.toBe(runtime);
+      expect(createRuntimeFn).toHaveBeenCalledWith({
+        rootDir: "/repo",
+        clientInfo: { name: "pi-mcporter", version: "1.0.0" },
       });
-      expect(runtime.getDefinition("unrelated").env).toBeUndefined();
+      expect(createRuntimeFn.mock.calls[0]?.[0]).not.toHaveProperty(
+        "configPath",
+      );
     } finally {
       if (previousHome === undefined) {
         delete process.env.HOME;
       } else {
         process.env.HOME = previousHome;
       }
-      if (previousToken === undefined) {
-        delete process.env.EXCALIDRAW_API_KEY;
+      if (previousConfig === undefined) {
+        delete process.env.MCPORTER_CONFIG;
       } else {
-        process.env.EXCALIDRAW_API_KEY = previousToken;
+        process.env.MCPORTER_CONFIG = previousConfig;
       }
 
       await rm(homeDirectory, { recursive: true, force: true });
     }
   });
 
-  it("keeps non-command env setting values literal even when process env has the same name", async () => {
+  it("recreates the runtime when the pi cwd changes", async () => {
+    const firstRuntime = createRuntimeStub();
+    const secondRuntime = createRuntimeStub();
+    const createRuntimeFn = vi
+      .fn()
+      .mockResolvedValueOnce(firstRuntime)
+      .mockResolvedValueOnce(secondRuntime);
+    const controller = createMcporterController({} as never, {
+      createRuntimeFn: createRuntimeFn as never,
+      packageVersion: "1.0.0",
+    });
+
+    await expect(controller.ensureRuntime("/repo-a")).resolves.toBe(
+      firstRuntime,
+    );
+    await expect(controller.ensureRuntime("/repo-b")).resolves.toBe(
+      secondRuntime,
+    );
+
+    expect(firstRuntime.close).toHaveBeenCalledTimes(1);
+    expect(createRuntimeFn).toHaveBeenNthCalledWith(1, {
+      rootDir: "/repo-a",
+      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
+    });
+    expect(createRuntimeFn).toHaveBeenNthCalledWith(2, {
+      rootDir: "/repo-b",
+      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
+    });
+  });
+
+  it("uses serverModes only for prompt orchestration", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
     const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const settingsPath = join(settingsDirectory, "mcporter.json");
     const previousHome = process.env.HOME;
-    const previousLiteralSource = process.env.LITERAL_SOURCE;
-    const runtime = createRuntimeStub(undefined, ["demo"]);
+    const runtime = createRuntimeStub(
+      async (server) => [demoTool(server, "lookup")],
+      ["alpha", "beta"],
+    );
     process.env.HOME = homeDirectory;
-    process.env.LITERAL_SOURCE = "ambient-value";
     await mkdir(settingsDirectory, { recursive: true });
     await writeFile(
-      settingsPath,
+      join(settingsDirectory, "mcporter.json"),
       JSON.stringify({
-        mcpServers: {
-          demo: {
-            env: {
-              TOKEN: "LITERAL_SOURCE",
-            },
-          },
-        },
+        mode: "index",
+        serverModes: { alpha: "lazy", beta: "preload" },
       }),
       "utf8",
     );
@@ -167,260 +240,14 @@ describe("createMcporterController", () => {
         packageVersion: "1.0.0",
       });
 
-      await expect(controller.ensureRuntime()).resolves.toBe(runtime);
-      expect(runtime.getDefinition("demo").env).toEqual({
-        TOKEN: "LITERAL_SOURCE",
-      });
+      const first = await controller.buildSystemPromptAppend("/repo");
+      expect(first).toContain("beta");
+      expect(first).not.toContain("alpha");
+      await delay(0);
+      const second = await controller.buildSystemPromptAppend("/repo");
+      expect(second).toContain("beta.lookup");
+      expect(second).not.toContain("alpha.lookup");
     } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-      if (previousLiteralSource === undefined) {
-        delete process.env.LITERAL_SOURCE;
-      } else {
-        process.env.LITERAL_SOURCE = previousLiteralSource;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
-  });
-
-  it("registers inline server definitions with resolved env overlays", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const settingsPath = join(settingsDirectory, "mcporter.json");
-    const previousHome = process.env.HOME;
-    const runtime = createRuntimeStub();
-    const createRuntimeFn = vi.fn().mockResolvedValue(runtime);
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      settingsPath,
-      JSON.stringify({
-        mcpServers: {
-          demo: {
-            command: "npx -y demo-server",
-            env: {
-              DEMO_TOKEN:
-                "!node -e \"process.stdout.write('inline-token\\n')\"",
-            },
-          },
-        },
-      }),
-      "utf8",
-    );
-
-    try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: createRuntimeFn as never,
-        packageVersion: "1.0.0",
-      });
-
-      await expect(controller.ensureRuntime()).resolves.toBe(runtime);
-      expect(createRuntimeFn).toHaveBeenCalledTimes(1);
-      expect(createRuntimeFn.mock.calls[0]?.[0]?.configPath).toBeUndefined();
-      expect(runtime.getDefinition("demo")).toEqual({
-        name: "demo",
-        command: {
-          kind: "stdio",
-          command: "npx",
-          args: ["-y", "demo-server"],
-          cwd: settingsDirectory,
-        },
-        env: { DEMO_TOKEN: "inline-token" },
-      });
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
-  });
-
-  it("overrides same-name servers from the mcporter config with inline definitions", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const settingsPath = join(settingsDirectory, "mcporter.json");
-    const previousHome = process.env.HOME;
-    const runtime = createRuntimeStub(undefined, ["demo"]);
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      settingsPath,
-      JSON.stringify({
-        mcpServers: {
-          demo: { url: "https://inline.example.com/mcp" },
-        },
-      }),
-      "utf8",
-    );
-
-    try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: vi.fn().mockResolvedValue(runtime) as never,
-        packageVersion: "1.0.0",
-      });
-
-      await expect(controller.ensureRuntime()).resolves.toBe(runtime);
-      expect(runtime.getDefinition("demo").command).toEqual({
-        kind: "http",
-        url: new URL("https://inline.example.com/mcp"),
-        headers: { accept: "application/json, text/event-stream" },
-      });
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
-  });
-
-  it("does not resolve command-backed env while lazy prompt preloading is disabled", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const settingsPath = join(settingsDirectory, "mcporter.json");
-    const markerPath = join(homeDirectory, "secret-command-ran");
-    const previousHome = process.env.HOME;
-    const createRuntimeFn = vi.fn();
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      settingsPath,
-      JSON.stringify({
-        mode: "lazy",
-        mcpServers: {
-          excalidraw: {
-            env: {
-              EXCALIDRAW_API_KEY: `!node -e "require('node:fs').writeFileSync('${markerPath}', 'ran')"`,
-            },
-          },
-        },
-      }),
-      "utf8",
-    );
-
-    try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: createRuntimeFn as never,
-        packageVersion: "1.0.0",
-      });
-
-      await expect(
-        controller.buildSystemPromptAppend(),
-      ).resolves.toBeUndefined();
-      expect(createRuntimeFn).not.toHaveBeenCalled();
-      await expect(stat(markerPath)).rejects.toThrow();
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
-  });
-
-  it("retries prompt preloading after transient failures", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const settingsPath = join(settingsDirectory, "mcporter.json");
-    const previousHome = process.env.HOME;
-    let attempts = 0;
-    const runtime = createRuntimeStub(async () => {
-      attempts += 1;
-      if (attempts === 1) {
-        await delay(30);
-      }
-      return [demoTool("alpha", "lookup")];
-    }, ["alpha"]);
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(settingsPath, JSON.stringify({ mode: "preload" }), "utf8");
-
-    try {
-      const controller = createMcporterController({} as never, {
-        catalogService: new CatalogService(
-          new CatalogStore({ listTimeoutMs: 10 }),
-        ),
-        createRuntimeFn: vi.fn().mockResolvedValue(runtime) as never,
-        packageVersion: "1.0.0",
-      });
-
-      await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-        "MCP servers are reachable",
-      );
-      await vi.waitFor(async () => {
-        await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-          "alpha.lookup",
-        );
-      });
-      expect(attempts).toBe(2);
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
-  });
-
-  it("refreshes prompt catalogs after TTL expiry", async () => {
-    vi.useFakeTimers();
-
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const settingsPath = join(settingsDirectory, "mcporter.json");
-    const previousHome = process.env.HOME;
-    let attempts = 0;
-    const runtime = createRuntimeStub(async () => {
-      attempts += 1;
-      return [
-        demoTool("alpha", attempts === 1 ? "legacy_lookup" : "fresh_lookup"),
-      ];
-    }, ["alpha"]);
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(settingsPath, JSON.stringify({ mode: "preload" }), "utf8");
-
-    try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: vi.fn().mockResolvedValue(runtime) as never,
-        packageVersion: "1.0.0",
-      });
-
-      await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-        "MCP servers are reachable",
-      );
-      await vi.advanceTimersByTimeAsync(0);
-      await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-        "alpha.legacy_lookup",
-      );
-      expect(attempts).toBe(1);
-
-      vi.advanceTimersByTime(CATALOG_TTL_MS + 1);
-
-      await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-        "MCP servers are reachable",
-      );
-      await vi.advanceTimersByTimeAsync(0);
-      await expect(controller.buildSystemPromptAppend()).resolves.toContain(
-        "alpha.fresh_lookup",
-      );
-      expect(attempts).toBe(2);
-    } finally {
-      vi.useRealTimers();
-
       if (previousHome === undefined) {
         delete process.env.HOME;
       } else {

@@ -1,13 +1,4 @@
-import { dirname } from "node:path";
 import { createRuntime, type Runtime } from "mcporter";
-import { registerInlineServers } from "./inline-servers.js";
-import { attachSecretEnvToRuntime } from "./secret-env.js";
-import {
-  resolveMcporterSettingsPath,
-  type McporterServerSettings,
-} from "./settings.js";
-
-type RuntimeSessionServerSettings = Record<string, McporterServerSettings>;
 
 class StaleRuntimeSessionError extends Error {
   constructor() {
@@ -17,81 +8,65 @@ class StaleRuntimeSessionError extends Error {
 
 export type RuntimeSessionOptions = {
   createRuntimeFn?: typeof createRuntime;
-  getRuntimeConfigPath: () => Promise<string | undefined>;
-  getRuntimeServerSettings?: () => Promise<
-    RuntimeSessionServerSettings | undefined
-  >;
-  getSettingsPath?: () => Promise<string | undefined>;
   packageVersion: string;
 };
 
 export class RuntimeSession {
   private readonly createRuntimeFn: typeof createRuntime;
-  private readonly getRuntimeConfigPath: () => Promise<string | undefined>;
-  private readonly getRuntimeServerSettings: () => Promise<
-    RuntimeSessionServerSettings | undefined
-  >;
-  private readonly getSettingsPath: () => Promise<string | undefined>;
   private readonly packageVersion: string;
 
   private generation = 0;
   private runtime: Runtime | undefined;
+  private runtimeKey: string | undefined;
   private runtimePromise: Promise<Runtime> | undefined;
+  private runtimePromiseKey: string | undefined;
 
   constructor(options: RuntimeSessionOptions) {
     this.createRuntimeFn = options.createRuntimeFn ?? createRuntime;
-    this.getRuntimeConfigPath = options.getRuntimeConfigPath;
-    this.getRuntimeServerSettings =
-      options.getRuntimeServerSettings ?? (async () => undefined);
-    this.getSettingsPath = options.getSettingsPath ?? (async () => undefined);
     this.packageVersion = options.packageVersion;
   }
 
-  async getRuntime(): Promise<Runtime> {
-    if (this.runtime) {
+  async getRuntime(rootDir?: string): Promise<Runtime> {
+    const key = normalizeRuntimeKey(rootDir);
+    if (this.runtime && this.runtimeKey === key) {
       return this.runtime;
+    }
+
+    if (
+      this.runtime ||
+      (this.runtimePromise && this.runtimePromiseKey !== key)
+    ) {
+      await this.shutdown();
     }
 
     if (!this.runtimePromise) {
       const generation = this.generation;
       let promise: Promise<Runtime>;
-      promise = Promise.all([
-        this.getRuntimeConfigPath(),
-        this.getRuntimeServerSettings(),
-        this.getSettingsPath(),
-      ])
-        .then(async ([configPath, mcpServers, settingsPath]) => {
-          this.throwIfStale(generation);
-          const runtime = await this.createRuntimeFn({
-            ...(configPath ? { configPath } : {}),
-            clientInfo: {
-              name: "pi-mcporter",
-              version: this.packageVersion,
-            },
-          });
-          registerInlineServers(
-            runtime,
-            mcpServers,
-            dirname(settingsPath ?? resolveMcporterSettingsPath()),
-          );
-          attachSecretEnvToRuntime(runtime, mcpServers);
-          return runtime;
-        })
+      promise = this.createRuntimeFn({
+        ...(rootDir ? { rootDir } : {}),
+        clientInfo: {
+          name: "pi-mcporter",
+          version: this.packageVersion,
+        },
+      })
         .then(async (created) => {
           if (generation !== this.generation) {
             await created.close().catch(() => {});
             throw new StaleRuntimeSessionError();
           }
           this.runtime = created;
+          this.runtimeKey = key;
           return created;
         })
         .catch((error) => {
           if (this.runtimePromise === promise) {
             this.runtimePromise = undefined;
+            this.runtimePromiseKey = undefined;
           }
           throw error;
         });
       this.runtimePromise = promise;
+      this.runtimePromiseKey = key;
     }
 
     return await this.runtimePromise;
@@ -101,16 +76,16 @@ export class RuntimeSession {
     this.generation += 1;
     const activeRuntime = this.runtime;
     this.runtime = undefined;
+    this.runtimeKey = undefined;
     this.runtimePromise = undefined;
+    this.runtimePromiseKey = undefined;
 
     if (activeRuntime) {
       await activeRuntime.close().catch(() => {});
     }
   }
+}
 
-  private throwIfStale(generation: number): void {
-    if (generation !== this.generation) {
-      throw new StaleRuntimeSessionError();
-    }
-  }
+function normalizeRuntimeKey(rootDir: string | undefined): string {
+  return rootDir?.trim() ?? "";
 }

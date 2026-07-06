@@ -131,13 +131,14 @@ With `lazy` even the index line disappears: the agent has no idea which MCP serv
 
 The trade-off: `index` buys discoverability for a handful of tokens; `preload` spends system-prompt tokens on the selector list to save discovery round-trips on every request; `lazy` keeps the context untouched.
 
-`mode` can be set globally and overridden per server via `mcpServers.<name>.mode`. A good pattern is to preload the one or two servers you use constantly and hide noisy ones:
+`mode` can be set globally and overridden per server via `serverModes`. A good pattern is to preload the one or two servers you use constantly and hide noisy ones:
 
 ```json
 {
-  "mcpServers": {
-    "linear": { "mode": "preload" },
-    "playwright": { "mode": "lazy" }
+  "mode": "index",
+  "serverModes": {
+    "linear": "preload",
+    "playwright": "lazy"
   }
 }
 ```
@@ -158,83 +159,50 @@ Tool name: `mcporter`
 
 ## ⚙️ Configuration
 
-Configure the extension in `~/.pi/agent/mcporter.json`:
+pi-mcporter intentionally keeps MCP server configuration in MCPorter. Put server definitions, transports, headers, environment interpolation, imports, and OAuth settings in MCPorter's config files:
+
+- `~/.mcporter/mcporter.json` for user-wide servers
+- `config/mcporter.json` in a project for repository-scoped servers
+- `MCPORTER_CONFIG=/absolute/path/to/mcporter.json` when you need an explicit config file
+
+Example MCPorter config:
 
 ```json
 {
-  "configPath": "/absolute/path/to/mcporter.json",
-  "timeoutMs": 30000,
-  "mode": "index",
   "mcpServers": {
-    "excalidraw": {
-      "env": {
-        "EXCALIDRAW_API_KEY": "!security find-generic-password -s 'excalidraw-api-key' -w"
+    "linear": {
+      "baseUrl": "https://mcp.linear.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LINEAR_API_KEY}"
       }
     },
-    "linear": {
-      "mode": "preload"
-    }
-  }
-}
-```
-
-- `MCPORTER_CONFIG=/absolute/path/to/mcporter.json` still overrides `configPath` from the settings file.
-- `configPath`: optional explicit MCPorter config path. If omitted, MCPorter uses its normal default resolution.
-- `mcpServers`: optional Pi-only settings keyed by MCPorter server name. Entries either overlay a server from the MCPorter config or define one inline (see below).
-  - `mcpServers.<name>.env`: environment variables for that server only. Values are literals by default; values starting with `!` execute as shell commands and use stdout, matching pi's command-backed secret style; values exactly matching `$env:VAR` or `${VAR}` read from the current process environment.
-  - `mcpServers.<name>.mode`: per-server mode override (`lazy`, `index`, or `preload`). Takes precedence over the top-level `mode` for that server.
-- `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
-- `mode`: optional default catalog visibility mode (`lazy`, `index`, or `preload`, default `index`) for servers without a per-server override. See [Modes & context preloading](#-modes--context-preloading).
-
-### Inline server definitions
-
-You can also define servers entirely in `~/.pi/agent/mcporter.json`, without touching the MCPorter config. An entry that sets `command` (stdio) or `url` (HTTP) becomes a full server definition:
-
-```json
-{
-  "mcpServers": {
     "everything": {
       "command": "npx -y @modelcontextprotocol/server-everything"
-    },
-    "excalidraw": {
-      "url": "https://api.excalidraw.com/api/v1/mcp",
-      "headers": {
-        "Authorization": "!security find-generic-password -s 'excalidraw-api-key' -w"
-      },
-      "mode": "preload"
     }
   }
 }
 ```
 
-Inline fields:
-
-- `command`: stdio launch command, either a single string (tokenized shell-style) or an array of `[command, ...args]`.
-- `args`: explicit argument list for a string `command`; skips tokenization.
-- `cwd`: working directory for stdio servers (`~` expands to your home directory). Defaults to the settings file's directory.
-- `url`: HTTP(S) endpoint of a remote MCP server. If both `url` and `command` are set, `url` wins.
-- `headers`: HTTP headers; values support the same secret syntax as `env` (`!command`, `$env:VAR`, `${VAR}`), which makes bearer tokens easy.
-
-Inline definitions compose with the MCPorter config: servers from both are available, and on a name collision the inline definition takes precedence. The `env` and `mode` settings apply to inline servers exactly as they do to overlaid ones.
-
-Alternatively, keep the server in `~/.mcporter/mcporter.json` secret-free:
+Configure only pi-specific orchestration in `~/.pi/agent/mcporter.json`:
 
 ```json
 {
-  "mcpServers": {
-    "excalidraw": {
-      "baseUrl": "https://api.excalidraw.com/api/v1/mcp",
-      "headers": {
-        "Authorization": "Bearer ${EXCALIDRAW_API_KEY}"
-      }
-    }
+  "timeoutMs": 30000,
+  "mode": "index",
+  "serverModes": {
+    "linear": "preload",
+    "playwright": "lazy"
   }
 }
 ```
 
-Then inject `EXCALIDRAW_API_KEY` from Keychain through the matching `mcpServers.excalidraw.env` overlay in `~/.pi/agent/mcporter.json` as shown above.
+- `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
+- `mode`: optional default catalog visibility mode (`lazy`, `index`, or `preload`, default `index`) for servers without a per-server override. See [Modes & context preloading](#-modes--context-preloading).
+- `serverModes`: optional per-server visibility overrides keyed by MCPorter server name. Values can be `lazy`, `index`, or `preload`.
 
-Legacy extension flags `--mcporter-config` and `--mcporter-timeout-ms` are no longer supported. Use `~/.pi/agent/mcporter.json`, `MCPORTER_CONFIG`, and per-call `timeoutMs` instead.
+For migration, legacy `mcpServers.<name>.mode` entries in `~/.pi/agent/mcporter.json` are still accepted as per-server mode overrides. Other legacy `mcpServers` fields such as `command`, `url`, `env`, and `headers` belong in MCPorter config and are ignored by pi-mcporter.
+
+Legacy extension flags `--mcporter-config` and `--mcporter-timeout-ms` are no longer supported. Use MCPorter config files, `MCPORTER_CONFIG`, and per-call `timeoutMs` instead.
 
 ## 🪄 Output behavior
 
@@ -250,7 +218,7 @@ Tool output follows pi's native expand/collapse behavior:
 - **Unknown server/tool**: run `npx mcporter list` and `npx mcporter list <server>` to verify names.
 - **Auth issues**: run `npx mcporter auth <server>`.
 - **Slow calls**: increase `timeoutMs` in `~/.pi/agent/mcporter.json` or override `timeoutMs` per tool call.
-- **Config not found**: set `configPath` in `~/.pi/agent/mcporter.json` or export `MCPORTER_CONFIG=<path>`.
+- **Config not found**: create `~/.mcporter/mcporter.json` or `config/mcporter.json`, or export `MCPORTER_CONFIG=<path>`.
 - **Truncated output**: the response includes a temp file path with full output.
 
 ## 🧹 Uninstall

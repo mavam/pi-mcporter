@@ -410,17 +410,12 @@ describe("mode resolution", () => {
   });
 
   it("prefers the per-server mode over the global mode", () => {
-    expect(__test__.resolveServerMode("lazy", { mode: "preload" })).toBe(
-      "preload",
-    );
-    expect(__test__.resolveServerMode("preload", { mode: "lazy" })).toBe(
-      "lazy",
-    );
+    expect(__test__.resolveServerMode("lazy", "preload")).toBe("preload");
+    expect(__test__.resolveServerMode("preload", "lazy")).toBe("lazy");
   });
 
   it("falls back to the global mode without a per-server override", () => {
     expect(__test__.resolveServerMode("preload", undefined)).toBe("preload");
-    expect(__test__.resolveServerMode("lazy", {})).toBe("lazy");
   });
 });
 

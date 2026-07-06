@@ -19,9 +19,9 @@ export function resolveMcporterMode(value: string | undefined): McporterMode {
 
 export function resolveServerMode(
   globalMode: McporterMode,
-  serverSettings?: { mode?: McporterMode },
+  serverMode?: McporterMode,
 ): McporterMode {
-  return serverSettings?.mode ?? globalMode;
+  return serverMode ?? globalMode;
 }
 
 export function shouldPreloadCatalog(mode: McporterMode): boolean {

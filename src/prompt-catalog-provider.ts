@@ -12,8 +12,9 @@ export class PromptCatalogProvider {
 
   async buildSystemPromptAppend(
     modeForServer: (server: string) => McporterMode,
+    rootDir?: string,
   ): Promise<string | undefined> {
-    const runtime = await this.runtimeSession.getRuntime();
+    const runtime = await this.runtimeSession.getRuntime(rootDir);
     const servers = runtime
       .listServers()
       .filter((server) => modeForServer(server) !== "lazy");
