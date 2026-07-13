@@ -30,6 +30,7 @@ export function createMcporterController(
 
   const runtimeSession = new RuntimeSession({
     createRuntimeFn: options.createRuntimeFn,
+    onRuntimeInvalidated: () => catalogService.clear(),
     packageVersion: options.packageVersion,
   });
   const promptCatalogProvider = new PromptCatalogProvider(
@@ -91,7 +92,6 @@ export function createMcporterController(
   async function shutdown(): Promise<void> {
     resolvedConfig = undefined;
     resolvedConfigPromise = undefined;
-    catalogService.clear();
     await runtimeSession.shutdown();
   }
 

@@ -215,6 +215,83 @@ describe("createMcporterController", () => {
     });
   });
 
+  it("clears the catalog when the pi cwd changes", async () => {
+    const firstRuntime = createRuntimeStub(
+      async () => [demoTool("alpha", "repo_a_lookup")],
+      ["alpha"],
+    );
+    const secondRuntime = createRuntimeStub(
+      async () => [demoTool("alpha", "repo_b_lookup")],
+      ["alpha"],
+    );
+    const createRuntimeFn = vi
+      .fn()
+      .mockResolvedValueOnce(firstRuntime)
+      .mockResolvedValueOnce(secondRuntime);
+    const controller = createMcporterController({} as never, {
+      createRuntimeFn: createRuntimeFn as never,
+      packageVersion: "1.0.0",
+    });
+
+    await controller.ensureRuntime("/repo-a");
+    await controller.catalogStore.getBasicCatalog(firstRuntime);
+    expect(controller.catalogStore.getCachedToolsForServer("alpha")).toEqual([
+      expect.objectContaining({ selector: "alpha.repo_a_lookup" }),
+    ]);
+
+    await controller.ensureRuntime("/repo-b");
+    expect(
+      controller.catalogStore.getCachedToolsForServer("alpha"),
+    ).toBeUndefined();
+    await expect(
+      controller.catalogStore.getBasicCatalog(secondRuntime),
+    ).resolves.toMatchObject({
+      tools: [expect.objectContaining({ selector: "alpha.repo_b_lookup" })],
+    });
+  });
+
+  it("serializes concurrent runtime changes for different roots", async () => {
+    let finishClosingFirst: (() => void) | undefined;
+    const firstRuntime = createRuntimeStub();
+    firstRuntime.close.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClosingFirst = resolve;
+        }),
+    );
+    const secondRuntime = createRuntimeStub();
+    const thirdRuntime = createRuntimeStub();
+    const createRuntimeFn = vi
+      .fn()
+      .mockResolvedValueOnce(firstRuntime)
+      .mockResolvedValueOnce(secondRuntime)
+      .mockResolvedValueOnce(thirdRuntime);
+    const controller = createMcporterController({} as never, {
+      createRuntimeFn: createRuntimeFn as never,
+      packageVersion: "1.0.0",
+    });
+
+    await controller.ensureRuntime("/repo-a");
+    const secondRequest = controller.ensureRuntime("/repo-b");
+    await vi.waitFor(() => {
+      expect(firstRuntime.close).toHaveBeenCalledTimes(1);
+    });
+    const thirdRequest = controller.ensureRuntime("/repo-c");
+
+    expect(createRuntimeFn).toHaveBeenCalledTimes(1);
+    finishClosingFirst?.();
+    await expect(secondRequest).resolves.toBe(secondRuntime);
+    await expect(thirdRequest).resolves.toBe(thirdRuntime);
+    expect(createRuntimeFn).toHaveBeenNthCalledWith(2, {
+      rootDir: "/repo-b",
+      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
+    });
+    expect(createRuntimeFn).toHaveBeenNthCalledWith(3, {
+      rootDir: "/repo-c",
+      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
+    });
+  });
+
   it("uses serverModes only for prompt orchestration", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
     const settingsDirectory = join(homeDirectory, ".pi", "agent");

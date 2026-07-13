@@ -209,6 +209,37 @@ describe("CatalogStore preload timeouts", () => {
       vi.useRealTimers();
     }
   });
+
+  it("does not restore catalog entries from loads that finish after clear", async () => {
+    const store = new CatalogStore();
+    let resolveOldTools: ((tools: ServerToolInfo[]) => void) | undefined;
+    const oldRuntime = createRuntimeStub(
+      () =>
+        new Promise<ServerToolInfo[]>((resolve) => {
+          resolveOldTools = resolve;
+        }),
+    );
+    const newRuntime = createRuntimeStub(async () => [
+      demoTool("alpha", "new_lookup"),
+    ]);
+
+    const oldLoad = store.getBasicCatalog(oldRuntime);
+    await vi.waitFor(() => {
+      expect(resolveOldTools).toBeTypeOf("function");
+    });
+
+    store.clear();
+    await expect(store.getBasicCatalog(newRuntime)).resolves.toMatchObject({
+      tools: [expect.objectContaining({ selector: "alpha.new_lookup" })],
+    });
+
+    resolveOldTools?.([demoTool("alpha", "old_lookup")]);
+    await oldLoad;
+
+    expect(store.getCachedToolsForServer("alpha")).toEqual([
+      expect.objectContaining({ selector: "alpha.new_lookup" }),
+    ]);
+  });
 });
 
 function delay(ms: number): Promise<void> {

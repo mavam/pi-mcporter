@@ -17,6 +17,7 @@ interface CatalogLoad<T> {
 
 export class CatalogStore {
   private readonly listTimeoutMs: number;
+  private generation = 0;
   private basicCatalogCache: Cached<CatalogSnapshot> | undefined;
   private basicCatalogLoad: Promise<CatalogSnapshot> | undefined;
 
@@ -35,6 +36,7 @@ export class CatalogStore {
   }
 
   clear(): void {
+    this.generation += 1;
     this.basicCatalogCache = undefined;
     this.basicCatalogLoad = undefined;
     this.basicServerCatalogCache.clear();
@@ -79,7 +81,9 @@ export class CatalogStore {
     }
 
     if (!this.basicCatalogLoad) {
-      this.basicCatalogLoad = (async () => {
+      const generation = this.generation;
+      let load: Promise<CatalogSnapshot>;
+      load = (async () => {
         const loadStartedAt = Date.now();
         const servers = activeRuntime.listServers();
         const byServer = new Map<string, CatalogTool[]>();
@@ -141,16 +145,21 @@ export class CatalogStore {
           warnings,
         };
 
-        this.basicCatalogCache = {
-          fetchedAt,
-          value: snapshot,
-          expiresAt,
-        };
+        if (generation === this.generation) {
+          this.basicCatalogCache = {
+            fetchedAt,
+            value: snapshot,
+            expiresAt,
+          };
+        }
 
         return snapshot;
       })().finally(() => {
-        this.basicCatalogLoad = undefined;
+        if (this.basicCatalogLoad === load) {
+          this.basicCatalogLoad = undefined;
+        }
       });
+      this.basicCatalogLoad = load;
     }
 
     return this.basicCatalogLoad;
@@ -190,7 +199,9 @@ export class CatalogStore {
       return loading.promise;
     }
 
-    const load = this.listToolsWithTimeout(
+    const generation = this.generation;
+    let promise: Promise<CatalogTool[]>;
+    promise = this.listToolsWithTimeout(
       activeRuntime,
       server,
       {
@@ -206,22 +217,26 @@ export class CatalogStore {
           .map((tool) => toCatalogTool(server, tool))
           .sort((a, b) => a.tool.localeCompare(b.tool));
 
-        this.basicServerCatalogCache.set(
-          server,
-          createCachedValue(mapped, fetchedAt),
-        );
+        if (generation === this.generation) {
+          this.basicServerCatalogCache.set(
+            server,
+            createCachedValue(mapped, fetchedAt),
+          );
+        }
 
         return mapped;
       })
       .finally(() => {
-        this.basicServerCatalogLoads.delete(server);
+        if (this.basicServerCatalogLoads.get(server)?.promise === promise) {
+          this.basicServerCatalogLoads.delete(server);
+        }
       });
 
     this.basicServerCatalogLoads.set(server, {
-      promise: load,
+      promise,
       timeoutMs,
     });
-    return load;
+    return promise;
   }
 
   async getServerCatalogWithSchema(
@@ -258,7 +273,9 @@ export class CatalogStore {
       return loading.promise;
     }
 
-    const load = this.listToolsWithTimeout(
+    const generation = this.generation;
+    let promise: Promise<CatalogTool[]>;
+    promise = this.listToolsWithTimeout(
       activeRuntime,
       server,
       {
@@ -274,26 +291,30 @@ export class CatalogStore {
           .map((tool) => toCatalogTool(server, tool))
           .sort((a, b) => a.tool.localeCompare(b.tool));
 
-        this.schemaCatalogCache.set(
-          server,
-          createCachedValue(mapped, fetchedAt),
-        );
-        this.basicServerCatalogCache.set(
-          server,
-          createCachedValue(mapped, fetchedAt),
-        );
+        if (generation === this.generation) {
+          this.schemaCatalogCache.set(
+            server,
+            createCachedValue(mapped, fetchedAt),
+          );
+          this.basicServerCatalogCache.set(
+            server,
+            createCachedValue(mapped, fetchedAt),
+          );
+        }
 
         return mapped;
       })
       .finally(() => {
-        this.schemaCatalogLoads.delete(server);
+        if (this.schemaCatalogLoads.get(server)?.promise === promise) {
+          this.schemaCatalogLoads.delete(server);
+        }
       });
 
     this.schemaCatalogLoads.set(server, {
-      promise: load,
+      promise,
       timeoutMs,
     });
-    return load;
+    return promise;
   }
 
   private async listToolsWithTimeout(
