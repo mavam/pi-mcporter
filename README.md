@@ -200,10 +200,6 @@ Configure only pi-specific orchestration in `~/.pi/agent/mcporter.json`:
 - `mode`: optional default catalog visibility mode (`lazy`, `index`, or `preload`, default `index`) for servers without a per-server override. See [Modes & context preloading](#-modes--context-preloading).
 - `serverModes`: optional per-server visibility overrides keyed by MCPorter server name. Values can be `lazy`, `index`, or `preload`.
 
-For migration, legacy `mcpServers.<name>.mode` entries in `~/.pi/agent/mcporter.json` are still accepted as per-server mode overrides. Other legacy `mcpServers` fields such as `command`, `url`, `env`, and `headers` belong in MCPorter config and are ignored by pi-mcporter.
-
-Legacy extension flags `--mcporter-config` and `--mcporter-timeout-ms` are no longer supported. Use MCPorter config files, `MCPORTER_CONFIG`, and per-call `timeoutMs` instead.
-
 ## 🪄 Output behavior
 
 Tool output follows pi's native expand/collapse behavior:

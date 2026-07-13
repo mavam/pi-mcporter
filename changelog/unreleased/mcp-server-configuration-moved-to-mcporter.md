@@ -37,4 +37,4 @@ After this change, move the server configuration to MCPorter and keep only pi-sp
 }
 ```
 
-This is a hard cut that removes pi-mcporter's `!command` secret execution and inline server support again. The clearer layering avoids competing configuration systems: MCPorter owns MCP connectivity and credentials, while pi-mcporter only decides how much MCP catalog metadata to expose to the agent.
+This is a hard cut that removes pi-mcporter's `!command` secret execution and inline server support. The clearer layering avoids competing configuration systems: MCPorter owns MCP connectivity and credentials, while pi-mcporter only decides how much MCP catalog metadata to expose to the agent.

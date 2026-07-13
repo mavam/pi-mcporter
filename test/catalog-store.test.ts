@@ -168,7 +168,7 @@ describe("CatalogStore preload timeouts", () => {
 
     try {
       const store = new CatalogStore();
-      const alphaResults = ["legacy_lookup", "fresh_lookup"];
+      const alphaResults = ["initial_lookup", "fresh_lookup"];
       const listCalls = new Map<string, number>();
       const runtime = createRuntimeStub(
         async (server) => {
@@ -192,7 +192,7 @@ describe("CatalogStore preload timeouts", () => {
 
       const firstSnapshot = await store.getBasicCatalog(runtime);
       expect(firstSnapshot.byServer.get("alpha")).toEqual([
-        expect.objectContaining({ selector: "alpha.legacy_lookup" }),
+        expect.objectContaining({ selector: "alpha.initial_lookup" }),
       ]);
       expect(listCalls.get("alpha")).toBe(1);
       expect(listCalls.get("beta")).toBe(1);

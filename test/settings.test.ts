@@ -34,7 +34,7 @@ describe("mcporter settings", () => {
         mode: "PRELOAD",
         serverModes: {
           linear: "PRELOAD",
-          playwright: { mode: "lazy" },
+          playwright: "lazy",
           ignored: "surprise",
         },
       }),
@@ -48,39 +48,12 @@ describe("mcporter settings", () => {
     });
   });
 
-  it("accepts legacy mcpServers entries only for per-server mode migration", () => {
-    expect(
-      normalizeMcporterSettings({
-        mcpServers: {
-          linear: { mode: "preload" },
-          ignoredEnvOnly: { env: { TOKEN: "literal" } },
-          ignoredInline: { command: "npx -y demo-server" },
-        },
-      }),
-    ).toEqual({
-      mode: "index",
-      serverModes: {
-        linear: "preload",
-      },
-      timeoutMs: 30_000,
-    });
-  });
-
-  it("lets serverModes win over legacy mcpServers mode entries", () => {
-    expect(
-      normalizeMcporterSettings({
-        mcpServers: { linear: { mode: "lazy" } },
-        serverModes: { linear: "preload" },
-      }).serverModes,
-    ).toEqual({ linear: "preload" });
-  });
-
   it("drops invalid per-server modes so the global mode applies", () => {
     expect(
       normalizeMcporterSettings({
         serverModes: {
           linear: "surprise",
-          slack: { mode: "surprise" },
+          slack: { mode: "lazy" },
         },
         mode: "preload",
       }),
@@ -93,7 +66,6 @@ describe("mcporter settings", () => {
   it("falls back to defaults for invalid scalar values", () => {
     expect(
       normalizeMcporterSettings({
-        configPath: "ignored-by-pi-mcporter",
         timeoutMs: "wat",
         mode: "surprise",
       }),

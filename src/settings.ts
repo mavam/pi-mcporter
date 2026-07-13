@@ -46,7 +46,7 @@ export function normalizeMcporterSettings(value: unknown): McporterSettings {
     typeof value.mode === "string"
       ? resolveMcporterMode(value.mode)
       : defaults.mode;
-  const serverModes = normalizeServerModes(value.serverModes, value.mcpServers);
+  const serverModes = normalizeServerModes(value.serverModes);
   const timeoutMs = normalizeTimeoutMs(value.timeoutMs);
 
   return {
@@ -86,50 +86,18 @@ export async function loadResolvedMcporterConfig(
 
 function normalizeServerModes(
   value: unknown,
-  legacyMcpServers: unknown,
 ): Record<string, McporterMode> | undefined {
-  const modes = new Map<string, McporterMode>();
-
-  for (const [serverName, mode] of Object.entries(
-    normalizeServerModesFromValue(legacyMcpServers),
-  )) {
-    modes.set(serverName, mode);
-  }
-
-  for (const [serverName, mode] of Object.entries(
-    normalizeServerModesFromValue(value),
-  )) {
-    modes.set(serverName, mode);
-  }
-
-  return modes.size > 0 ? Object.fromEntries(modes) : undefined;
-}
-
-function normalizeServerModesFromValue(
-  value: unknown,
-): Record<string, McporterMode> {
   if (!isPlainObject(value)) {
-    return {};
+    return undefined;
   }
 
-  const entries = Object.entries(value).flatMap(([serverName, rawSettings]) => {
-    const mode = parseServerModeSetting(rawSettings);
+  const entries = Object.entries(value).flatMap(([serverName, rawMode]) => {
+    const mode =
+      typeof rawMode === "string" ? parseMcporterMode(rawMode) : null;
     return mode ? ([[serverName, mode]] as const) : [];
   });
 
-  return Object.fromEntries(entries);
-}
-
-function parseServerModeSetting(value: unknown): McporterMode | undefined {
-  if (typeof value === "string") {
-    return parseMcporterMode(value);
-  }
-
-  if (isPlainObject(value) && typeof value.mode === "string") {
-    return parseMcporterMode(value.mode);
-  }
-
-  return undefined;
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function normalizeTimeoutMs(value: unknown): number {

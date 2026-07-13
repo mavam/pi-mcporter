@@ -193,51 +193,6 @@ describe("extension startup modes", () => {
     }
   });
 
-  it("still accepts legacy mcpServers.<name>.mode for migration", async () => {
-    vi.resetModules();
-
-    const listTools = vi.fn<Runtime["listTools"]>();
-    const runtime = createRuntimeStub(listTools, ["alpha"]);
-    vi.doMock("mcporter", () => ({
-      createRuntime: vi.fn().mockResolvedValue(runtime),
-    }));
-
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const previousHome = process.env.HOME;
-
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      join(settingsDirectory, "mcporter.json"),
-      JSON.stringify({
-        mode: "index",
-        mcpServers: { alpha: { mode: "lazy" } },
-      }),
-      "utf8",
-    );
-    process.env.HOME = homeDirectory;
-
-    try {
-      const { default: mcporterExtension } = await import("../src/index.ts");
-      const pi = createExtensionPiStub();
-
-      await mcporterExtension(pi.api);
-
-      await expect(pi.beforeAgentStart()).resolves.toBeUndefined();
-      expect(listTools).not.toHaveBeenCalled();
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      vi.doUnmock("mcporter");
-      vi.resetModules();
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
-  });
-
   it("injects warmed preload catalog metadata into the system prompt", async () => {
     vi.resetModules();
 

@@ -141,19 +141,12 @@ describe("createMcporterController", () => {
 
   it("delegates MCPorter config resolution to mcporter", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
     const previousHome = process.env.HOME;
     const previousConfig = process.env.MCPORTER_CONFIG;
     const runtime = createRuntimeStub(undefined, ["demo"]);
     const createRuntimeFn = vi.fn().mockResolvedValue(runtime);
     process.env.HOME = homeDirectory;
     process.env.MCPORTER_CONFIG = "/env/mcporter.json";
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      join(settingsDirectory, "mcporter.json"),
-      JSON.stringify({ configPath: "/ignored/by/pi-mcporter.json" }),
-      "utf8",
-    );
 
     try {
       const controller = createMcporterController({} as never, {
