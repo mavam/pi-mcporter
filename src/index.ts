@@ -52,9 +52,9 @@ export default function mcporterExtension(pi: ExtensionAPI) {
       `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} and saved to a temp file when truncated.`,
     parameters: McporterParameters,
 
-    async execute(_toolCallId, rawParams, signal, onUpdate, _ctx) {
+    async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
       const params = rawParams as McporterParams;
-      const activeRuntime = await controller.ensureRuntime();
+      const activeRuntime = await controller.ensureRuntime(ctx.cwd);
       if (signal?.aborted) {
         throw new Error("Cancelled.");
       }
@@ -133,12 +133,14 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on("before_agent_start", async (event) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     if (!isToolActive(pi, "mcporter")) {
       return;
     }
 
-    const systemPromptAppend = await controller.buildSystemPromptAppend();
+    const systemPromptAppend = await controller.buildSystemPromptAppend(
+      ctx.cwd,
+    );
     if (systemPromptAppend) {
       return {
         systemPrompt: `${event.systemPrompt}\n\n${systemPromptAppend}`,

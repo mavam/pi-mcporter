@@ -30,11 +30,7 @@ export function createMcporterController(
 
   const runtimeSession = new RuntimeSession({
     createRuntimeFn: options.createRuntimeFn,
-    getRuntimeConfigPath: async () =>
-      (await ensureResolvedConfig()).runtimeConfigPath,
-    getRuntimeServerSettings: async () =>
-      (await ensureResolvedConfig()).mcpServers,
-    getSettingsPath: async () => (await ensureResolvedConfig()).settingsPath,
+    onRuntimeInvalidated: () => catalogService.clear(),
     packageVersion: options.packageVersion,
   });
   const promptCatalogProvider = new PromptCatalogProvider(
@@ -66,27 +62,27 @@ export function createMcporterController(
     return await resolvedConfigPromise;
   }
 
-  function resolveCallTimeout(override?: number): number {
-    return resolveCallTimeoutFromInputs(
-      override,
-      String(resolvedConfig?.timeoutMs ?? defaultSettings.timeoutMs),
-    );
+  async function resolveCallTimeout(override?: number): Promise<number> {
+    const config = await ensureResolvedConfig().catch(() => defaultSettings);
+    return resolveCallTimeoutFromInputs(override, String(config.timeoutMs));
   }
 
-  async function buildSystemPromptAppend(): Promise<string | undefined> {
+  async function buildSystemPromptAppend(
+    rootDir?: string,
+  ): Promise<string | undefined> {
     try {
       const config = await ensureResolvedConfig();
       const anyVisible =
         config.mode !== "lazy" ||
-        Object.values(config.mcpServers ?? {}).some(
-          (server) => server.mode && server.mode !== "lazy",
-        );
+        Object.values(config.serverModes ?? {}).some((mode) => mode !== "lazy");
       if (!anyVisible) {
         return undefined;
       }
 
-      return await promptCatalogProvider.buildSystemPromptAppend((server) =>
-        resolveServerMode(config.mode, config.mcpServers?.[server]),
+      return await promptCatalogProvider.buildSystemPromptAppend(
+        (server) =>
+          resolveServerMode(config.mode, config.serverModes?.[server]),
+        rootDir,
       );
     } catch {
       return undefined;
@@ -96,14 +92,13 @@ export function createMcporterController(
   async function shutdown(): Promise<void> {
     resolvedConfig = undefined;
     resolvedConfigPromise = undefined;
-    catalogService.clear();
     await runtimeSession.shutdown();
   }
 
   return {
     catalogStore: catalogService.store,
     buildSystemPromptAppend,
-    ensureRuntime: () => runtimeSession.getRuntime(),
+    ensureRuntime: (rootDir?: string) => runtimeSession.getRuntime(rootDir),
     resolveCallTimeout,
     shutdown,
   };

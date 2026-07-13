@@ -1,13 +1,4 @@
-import { dirname } from "node:path";
 import { createRuntime, type Runtime } from "mcporter";
-import { registerInlineServers } from "./inline-servers.js";
-import { attachSecretEnvToRuntime } from "./secret-env.js";
-import {
-  resolveMcporterSettingsPath,
-  type McporterServerSettings,
-} from "./settings.js";
-
-type RuntimeSessionServerSettings = Record<string, McporterServerSettings>;
 
 class StaleRuntimeSessionError extends Error {
   constructor() {
@@ -17,100 +8,91 @@ class StaleRuntimeSessionError extends Error {
 
 export type RuntimeSessionOptions = {
   createRuntimeFn?: typeof createRuntime;
-  getRuntimeConfigPath: () => Promise<string | undefined>;
-  getRuntimeServerSettings?: () => Promise<
-    RuntimeSessionServerSettings | undefined
-  >;
-  getSettingsPath?: () => Promise<string | undefined>;
+  onRuntimeInvalidated?: () => void;
   packageVersion: string;
 };
 
 export class RuntimeSession {
   private readonly createRuntimeFn: typeof createRuntime;
-  private readonly getRuntimeConfigPath: () => Promise<string | undefined>;
-  private readonly getRuntimeServerSettings: () => Promise<
-    RuntimeSessionServerSettings | undefined
-  >;
-  private readonly getSettingsPath: () => Promise<string | undefined>;
+  private readonly onRuntimeInvalidated: () => void;
   private readonly packageVersion: string;
 
   private generation = 0;
   private runtime: Runtime | undefined;
-  private runtimePromise: Promise<Runtime> | undefined;
+  private runtimeKey: string | undefined;
+  private shutdownEpoch = 0;
+  private transitionQueue: Promise<void> = Promise.resolve();
 
   constructor(options: RuntimeSessionOptions) {
     this.createRuntimeFn = options.createRuntimeFn ?? createRuntime;
-    this.getRuntimeConfigPath = options.getRuntimeConfigPath;
-    this.getRuntimeServerSettings =
-      options.getRuntimeServerSettings ?? (async () => undefined);
-    this.getSettingsPath = options.getSettingsPath ?? (async () => undefined);
+    this.onRuntimeInvalidated = options.onRuntimeInvalidated ?? (() => {});
     this.packageVersion = options.packageVersion;
   }
 
-  async getRuntime(): Promise<Runtime> {
-    if (this.runtime) {
-      return this.runtime;
-    }
+  async getRuntime(rootDir?: string): Promise<Runtime> {
+    const key = normalizeRuntimeKey(rootDir);
+    const requestShutdownEpoch = this.shutdownEpoch;
+    return await this.enqueueTransition(async () => {
+      if (requestShutdownEpoch !== this.shutdownEpoch) {
+        throw new StaleRuntimeSessionError();
+      }
+      if (this.runtime && this.runtimeKey === key) {
+        return this.runtime;
+      }
 
-    if (!this.runtimePromise) {
+      const activeRuntime = this.runtime;
+      if (activeRuntime) {
+        this.invalidateRuntime();
+        await activeRuntime.close().catch(() => {});
+        if (requestShutdownEpoch !== this.shutdownEpoch) {
+          throw new StaleRuntimeSessionError();
+        }
+      }
+
       const generation = this.generation;
-      let promise: Promise<Runtime>;
-      promise = Promise.all([
-        this.getRuntimeConfigPath(),
-        this.getRuntimeServerSettings(),
-        this.getSettingsPath(),
-      ])
-        .then(async ([configPath, mcpServers, settingsPath]) => {
-          this.throwIfStale(generation);
-          const runtime = await this.createRuntimeFn({
-            ...(configPath ? { configPath } : {}),
-            clientInfo: {
-              name: "pi-mcporter",
-              version: this.packageVersion,
-            },
-          });
-          registerInlineServers(
-            runtime,
-            mcpServers,
-            dirname(settingsPath ?? resolveMcporterSettingsPath()),
-          );
-          attachSecretEnvToRuntime(runtime, mcpServers);
-          return runtime;
-        })
-        .then(async (created) => {
-          if (generation !== this.generation) {
-            await created.close().catch(() => {});
-            throw new StaleRuntimeSessionError();
-          }
-          this.runtime = created;
-          return created;
-        })
-        .catch((error) => {
-          if (this.runtimePromise === promise) {
-            this.runtimePromise = undefined;
-          }
-          throw error;
-        });
-      this.runtimePromise = promise;
-    }
-
-    return await this.runtimePromise;
+      const created = await this.createRuntimeFn({
+        ...(rootDir ? { rootDir } : {}),
+        clientInfo: {
+          name: "pi-mcporter",
+          version: this.packageVersion,
+        },
+      });
+      if (generation !== this.generation) {
+        await created.close().catch(() => {});
+        throw new StaleRuntimeSessionError();
+      }
+      this.runtime = created;
+      this.runtimeKey = key;
+      return created;
+    });
   }
 
   async shutdown(): Promise<void> {
-    this.generation += 1;
+    this.shutdownEpoch += 1;
     const activeRuntime = this.runtime;
-    this.runtime = undefined;
-    this.runtimePromise = undefined;
-
+    this.invalidateRuntime();
     if (activeRuntime) {
       await activeRuntime.close().catch(() => {});
     }
   }
 
-  private throwIfStale(generation: number): void {
-    if (generation !== this.generation) {
-      throw new StaleRuntimeSessionError();
-    }
+  private invalidateRuntime(): void {
+    this.generation += 1;
+    this.runtime = undefined;
+    this.runtimeKey = undefined;
+    this.onRuntimeInvalidated();
   }
+
+  private enqueueTransition<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.transitionQueue.then(operation, operation);
+    this.transitionQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+}
+
+function normalizeRuntimeKey(rootDir: string | undefined): string {
+  return rootDir?.trim() ?? "";
 }
