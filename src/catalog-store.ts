@@ -1,39 +1,25 @@
 import type { Runtime, ServerToolInfo } from "mcporter";
-import {
-  CATALOG_TTL_MS,
-  DEFAULT_CATALOG_LIST_TIMEOUT_MS,
-} from "./constants.js";
+import { CATALOG_TTL_MS } from "./constants.js";
 import { toErrorMessage } from "./helpers.js";
 import type { Cached, CatalogSnapshot, CatalogTool } from "./types.js";
 
-export interface CatalogStoreOptions {
-  listTimeoutMs?: number;
+export interface CachedCatalogOptions {
+  allowStale?: boolean;
+  requireSchema?: boolean;
 }
 
-interface CatalogLoad<T> {
-  promise: Promise<T>;
-  timeoutMs: number | undefined;
-}
+export type CatalogCacheState = "cold" | "fresh" | "stale";
 
 export class CatalogStore {
-  private readonly listTimeoutMs: number;
   private generation = 0;
   private basicCatalogCache: Cached<CatalogSnapshot> | undefined;
   private basicCatalogLoad: Promise<CatalogSnapshot> | undefined;
 
   private basicServerCatalogCache = new Map<string, Cached<CatalogTool[]>>();
-  private basicServerCatalogLoads = new Map<
-    string,
-    CatalogLoad<CatalogTool[]>
-  >();
+  private basicServerCatalogLoads = new Map<string, Promise<CatalogTool[]>>();
 
   private schemaCatalogCache = new Map<string, Cached<CatalogTool[]>>();
-  private schemaCatalogLoads = new Map<string, CatalogLoad<CatalogTool[]>>();
-
-  constructor(options: CatalogStoreOptions = {}) {
-    this.listTimeoutMs =
-      options.listTimeoutMs ?? DEFAULT_CATALOG_LIST_TIMEOUT_MS;
-  }
+  private schemaCatalogLoads = new Map<string, Promise<CatalogTool[]>>();
 
   clear(): void {
     this.generation += 1;
@@ -54,24 +40,51 @@ export class CatalogStore {
     this.schemaCatalogLoads.delete(server);
   }
 
-  getCachedToolsForServer(server: string): CatalogTool[] | undefined {
+  getCachedToolsForServer(
+    server: string,
+    options: CachedCatalogOptions = {},
+  ): CatalogTool[] | undefined {
     const now = Date.now();
+    const isUsable = (cached: Cached<unknown>): boolean =>
+      options.allowStale === true || cached.expiresAt > now;
 
     const schemaCached = this.schemaCatalogCache.get(server);
-    if (schemaCached && schemaCached.expiresAt > now) {
+    if (schemaCached && isUsable(schemaCached)) {
       return schemaCached.value;
     }
 
+    if (options.requireSchema) {
+      return undefined;
+    }
+
     const basicCached = this.basicServerCatalogCache.get(server);
-    if (basicCached && basicCached.expiresAt > now) {
+    if (basicCached && isUsable(basicCached)) {
       return basicCached.value;
     }
 
-    if (this.basicCatalogCache && this.basicCatalogCache.expiresAt > now) {
+    if (this.basicCatalogCache && isUsable(this.basicCatalogCache)) {
       return this.basicCatalogCache.value.byServer.get(server) ?? [];
     }
 
     return undefined;
+  }
+
+  getSchemaCacheState(server: string): CatalogCacheState {
+    const cached = this.schemaCatalogCache.get(server);
+    if (!cached) return "cold";
+    return cached.expiresAt > Date.now() ? "fresh" : "stale";
+  }
+
+  /**
+   * Starts a schema-bearing catalog load without imposing the legacy preload
+   * timeout. Callers may stop awaiting it while the request continues to warm
+   * the in-memory cache.
+   */
+  startServerCatalogWithSchema(
+    activeRuntime: Runtime,
+    server: string,
+  ): Promise<CatalogTool[]> {
+    return this.getServerCatalogWithSchemaInternal(activeRuntime, server);
   }
 
   async getBasicCatalog(activeRuntime: Runtime): Promise<CatalogSnapshot> {
@@ -172,21 +185,9 @@ export class CatalogStore {
     return await this.getServerCatalogBasicInternal(activeRuntime, server);
   }
 
-  async preloadServerCatalogBasic(
-    activeRuntime: Runtime,
-    server: string,
-  ): Promise<CatalogTool[]> {
-    return await this.getServerCatalogBasicInternal(
-      activeRuntime,
-      server,
-      this.listTimeoutMs,
-    );
-  }
-
   private async getServerCatalogBasicInternal(
     activeRuntime: Runtime,
     server: string,
-    timeoutMs?: number,
   ): Promise<CatalogTool[]> {
     const now = Date.now();
     const cached = this.basicServerCatalogCache.get(server);
@@ -195,22 +196,16 @@ export class CatalogStore {
     }
 
     const loading = this.basicServerCatalogLoads.get(server);
-    if (loading && hasMatchingTimeoutProfile(loading.timeoutMs, timeoutMs)) {
-      return loading.promise;
-    }
+    if (loading) return loading;
 
     const generation = this.generation;
     let promise: Promise<CatalogTool[]>;
-    promise = this.listToolsWithTimeout(
-      activeRuntime,
-      server,
-      {
+    promise = activeRuntime
+      .listTools(server, {
         includeSchema: false,
         autoAuthorize: false,
         allowCachedAuth: true,
-      },
-      timeoutMs,
-    )
+      })
       .then((listed) => {
         const fetchedAt = Date.now();
         const mapped = listed
@@ -227,15 +222,12 @@ export class CatalogStore {
         return mapped;
       })
       .finally(() => {
-        if (this.basicServerCatalogLoads.get(server)?.promise === promise) {
+        if (this.basicServerCatalogLoads.get(server) === promise) {
           this.basicServerCatalogLoads.delete(server);
         }
       });
 
-    this.basicServerCatalogLoads.set(server, {
-      promise,
-      timeoutMs,
-    });
+    this.basicServerCatalogLoads.set(server, promise);
     return promise;
   }
 
@@ -246,21 +238,9 @@ export class CatalogStore {
     return await this.getServerCatalogWithSchemaInternal(activeRuntime, server);
   }
 
-  async preloadServerCatalogWithSchema(
-    activeRuntime: Runtime,
-    server: string,
-  ): Promise<CatalogTool[]> {
-    return await this.getServerCatalogWithSchemaInternal(
-      activeRuntime,
-      server,
-      this.listTimeoutMs,
-    );
-  }
-
   private async getServerCatalogWithSchemaInternal(
     activeRuntime: Runtime,
     server: string,
-    timeoutMs?: number,
   ): Promise<CatalogTool[]> {
     const now = Date.now();
     const cached = this.schemaCatalogCache.get(server);
@@ -269,22 +249,16 @@ export class CatalogStore {
     }
 
     const loading = this.schemaCatalogLoads.get(server);
-    if (loading && hasMatchingTimeoutProfile(loading.timeoutMs, timeoutMs)) {
-      return loading.promise;
-    }
+    if (loading) return loading;
 
     const generation = this.generation;
     let promise: Promise<CatalogTool[]>;
-    promise = this.listToolsWithTimeout(
-      activeRuntime,
-      server,
-      {
+    promise = activeRuntime
+      .listTools(server, {
         includeSchema: true,
         autoAuthorize: false,
         allowCachedAuth: true,
-      },
-      timeoutMs,
-    )
+      })
       .then((listed) => {
         const fetchedAt = Date.now();
         const mapped = listed
@@ -305,30 +279,13 @@ export class CatalogStore {
         return mapped;
       })
       .finally(() => {
-        if (this.schemaCatalogLoads.get(server)?.promise === promise) {
+        if (this.schemaCatalogLoads.get(server) === promise) {
           this.schemaCatalogLoads.delete(server);
         }
       });
 
-    this.schemaCatalogLoads.set(server, {
-      promise,
-      timeoutMs,
-    });
+    this.schemaCatalogLoads.set(server, promise);
     return promise;
-  }
-
-  private async listToolsWithTimeout(
-    activeRuntime: Runtime,
-    server: string,
-    options: Parameters<Runtime["listTools"]>[1],
-    timeoutMs?: number,
-  ): Promise<ServerToolInfo[]> {
-    const request = activeRuntime.listTools(server, options);
-    return await raceWithTimeout(
-      request,
-      timeoutMs,
-      `Timed out loading MCP tool catalog for '${server}' after ${timeoutMs}ms.`,
-    );
   }
 
   private getFreshCachedEntry<T>(
@@ -336,45 +293,6 @@ export class CatalogStore {
   ): Cached<T> | undefined {
     return cached && cached.expiresAt > Date.now() ? cached : undefined;
   }
-}
-
-function raceWithTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number | undefined,
-  message: string,
-): Promise<T> {
-  if (
-    timeoutMs === undefined ||
-    !Number.isFinite(timeoutMs) ||
-    timeoutMs <= 0
-  ) {
-    return promise;
-  }
-
-  const effectiveTimeoutMs = timeoutMs;
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(message));
-    }, effectiveTimeoutMs);
-
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
-
-function hasMatchingTimeoutProfile(
-  currentTimeoutMs: number | undefined,
-  requestedTimeoutMs: number | undefined,
-): boolean {
-  return currentTimeoutMs === requestedTimeoutMs;
 }
 
 function createCachedValue<T>(value: T, fetchedAt = Date.now()): Cached<T> {

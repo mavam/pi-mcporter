@@ -67,6 +67,12 @@ export class RuntimeSession {
     });
   }
 
+  peekRuntime(rootDir?: string): Runtime | undefined {
+    return this.runtimeKey === normalizeRuntimeKey(rootDir)
+      ? this.runtime
+      : undefined;
+  }
+
   async shutdown(): Promise<void> {
     this.shutdownEpoch += 1;
     const activeRuntime = this.runtime;

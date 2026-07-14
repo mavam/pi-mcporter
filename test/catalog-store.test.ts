@@ -1,169 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
+import { CatalogService } from "../src/catalog-service.ts";
 import { CatalogStore } from "../src/catalog-store.ts";
 import { CATALOG_TTL_MS } from "../src/constants.ts";
-import { preloadCatalog } from "../src/startup.ts";
 
-describe("CatalogStore preload timeouts", () => {
-  it("does not reuse in-flight preload schema requests for interactive reads", async () => {
-    const store = new CatalogStore({ listTimeoutMs: 10 });
-    let schemaCalls = 0;
-    const runtime = createRuntimeStub(async (_server, options) => {
-      schemaCalls += 1;
-      await delay(options?.includeSchema ? 30 : 0);
-      return [demoTool("alpha", "lookup")];
-    });
-
-    const preloadResult = store
-      .preloadServerCatalogWithSchema(runtime, "alpha")
-      .then(
-        () => ({ ok: true as const }),
-        (error) => ({ ok: false as const, error }),
-      );
-    await delay(5);
-
-    await expect(
-      store.getServerCatalogWithSchema(runtime, "alpha"),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        selector: "alpha.lookup",
-      }),
-    ]);
-    await expect(preloadResult).resolves.toMatchObject({
-      ok: false,
-      error: expect.objectContaining({
-        message: expect.stringContaining(
-          "Timed out loading MCP tool catalog for 'alpha'",
-        ),
-      }),
-    });
-    expect(schemaCalls).toBe(2);
-  });
-
-  it("does not apply preload timeouts to interactive schema reads", async () => {
-    const store = new CatalogStore({ listTimeoutMs: 10 });
-    const runtime = createRuntimeStub(async () => {
-      await delay(30);
-      return [demoTool("alpha", "lookup")];
-    });
-
-    await expect(
-      store.getServerCatalogWithSchema(runtime, "alpha"),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        selector: "alpha.lookup",
-      }),
-    ]);
-  });
-
-  it("still applies the timeout while preloading schema reads", async () => {
-    const store = new CatalogStore({ listTimeoutMs: 10 });
-    const runtime = createRuntimeStub(async () => {
-      await delay(30);
-      return [demoTool("alpha", "lookup")];
-    });
-
-    await expect(
-      store.preloadServerCatalogWithSchema(runtime, "alpha"),
-    ).rejects.toThrow("Timed out loading MCP tool catalog for 'alpha'");
-  });
-
-  it("does not reuse in-flight preload basic requests for interactive reads", async () => {
-    const store = new CatalogStore({ listTimeoutMs: 10 });
-    let basicCalls = 0;
-    const runtime = createRuntimeStub(async (_server, options) => {
-      basicCalls += 1;
-      await delay(options?.includeSchema ? 0 : 30);
-      return [demoTool("alpha", "lookup")];
-    });
-
-    const preloadResult = store
-      .preloadServerCatalogBasic(runtime, "alpha")
-      .then(
-        () => ({ ok: true as const }),
-        (error) => ({ ok: false as const, error }),
-      );
-    await delay(5);
-
-    await expect(
-      store.getServerCatalogBasic(runtime, "alpha"),
-    ).resolves.toEqual([expect.objectContaining({ selector: "alpha.lookup" })]);
-    await expect(preloadResult).resolves.toMatchObject({
-      ok: false,
-      error: expect.objectContaining({
-        message: expect.stringContaining(
-          "Timed out loading MCP tool catalog for 'alpha'",
-        ),
-      }),
-    });
-    expect(basicCalls).toBe(2);
-  });
-
-  it("falls back to basic discovery after schema preload failures", async () => {
-    const store = new CatalogStore({ listTimeoutMs: 10 });
-    const includeSchemaCalls: boolean[] = [];
-    const runtime = createRuntimeStub(async (_server, options) => {
-      includeSchemaCalls.push(Boolean(options?.includeSchema));
-      if (options?.includeSchema) {
-        throw new Error("schema load failed");
-      }
-      return [demoTool("alpha", "lookup")];
-    });
-
-    await expect(
-      store.preloadServerCatalogWithSchema(runtime, "alpha"),
-    ).rejects.toThrow("schema load failed");
-
-    const catalog = await store.getBasicCatalog(runtime);
-
-    expect(catalog.tools).toEqual([
-      expect.objectContaining({ selector: "alpha.lookup" }),
-    ]);
-    expect(catalog.byServer.get("alpha")).toEqual([
-      expect.objectContaining({ selector: "alpha.lookup" }),
-    ]);
-    expect(catalog.warnings).toEqual([]);
-    expect(includeSchemaCalls).toEqual([true, false]);
-  });
-
-  it("retries failed preload servers when building search snapshots", async () => {
-    const store = new CatalogStore({ listTimeoutMs: 10 });
-    const listCalls = new Map<string, number>();
-    const runtime = createRuntimeStub(
-      async (server) => {
-        listCalls.set(server, (listCalls.get(server) ?? 0) + 1);
-        if (server === "beta" && listCalls.get(server) === 1) {
-          await delay(30);
-        }
-        return [demoTool(server, "lookup")];
-      },
-      ["alpha", "beta"],
+describe("CatalogStore", () => {
+  it("coalesces concurrent schema reads", async () => {
+    let resolveTools: ((tools: ServerToolInfo[]) => void) | undefined;
+    const listTools = vi.fn(
+      () =>
+        new Promise<ServerToolInfo[]>((resolve) => {
+          resolveTools = resolve;
+        }),
     );
+    const runtime = createRuntimeStub(listTools);
+    const store = new CatalogStore();
 
-    const summary = await preloadCatalog(runtime, store);
-    expect(summary.warmedServers).toEqual(["alpha"]);
-    expect(summary.warnings).toEqual([
-      expect.stringContaining("beta: Timed out loading MCP tool catalog"),
-    ]);
+    const first = store.getServerCatalogWithSchema(runtime, "alpha");
+    const second = store.startServerCatalogWithSchema(runtime, "alpha");
+    expect(listTools).toHaveBeenCalledOnce();
+    resolveTools?.([schemaTool("alpha", "lookup")]);
 
-    const catalog = await store.getBasicCatalog(runtime);
-
-    expect(catalog.tools.map((tool) => tool.selector)).toEqual([
-      "alpha.lookup",
-      "beta.lookup",
-    ]);
-    expect(catalog.byServer.get("alpha")).toEqual([
+    await expect(first).resolves.toEqual([
       expect.objectContaining({ selector: "alpha.lookup" }),
     ]);
-    expect(catalog.byServer.get("beta")).toEqual([
-      expect.objectContaining({ selector: "beta.lookup" }),
+    await expect(second).resolves.toEqual([
+      expect.objectContaining({ selector: "alpha.lookup" }),
     ]);
-    expect(catalog.warnings).toEqual([]);
-    expect(listCalls.get("alpha")).toBe(1);
-    expect(listCalls.get("beta")).toBe(2);
   });
 
-  it("expires aggregate snapshots when a reused per-server cache entry expires", async () => {
+  it("expires aggregate snapshots with their reused server entries", async () => {
     vi.useFakeTimers();
 
     try {
@@ -189,16 +55,12 @@ describe("CatalogStore preload timeouts", () => {
 
       await store.getServerCatalogBasic(runtime, "alpha");
       vi.advanceTimersByTime(CATALOG_TTL_MS - 1);
-
       const firstSnapshot = await store.getBasicCatalog(runtime);
       expect(firstSnapshot.byServer.get("alpha")).toEqual([
         expect.objectContaining({ selector: "alpha.initial_lookup" }),
       ]);
-      expect(listCalls.get("alpha")).toBe(1);
-      expect(listCalls.get("beta")).toBe(1);
 
       vi.advanceTimersByTime(2);
-
       const secondSnapshot = await store.getBasicCatalog(runtime);
       expect(secondSnapshot.byServer.get("alpha")).toEqual([
         expect.objectContaining({ selector: "alpha.fresh_lookup" }),
@@ -210,7 +72,7 @@ describe("CatalogStore preload timeouts", () => {
     }
   });
 
-  it("does not restore catalog entries from loads that finish after clear", async () => {
+  it("does not restore entries from loads that finish after clear", async () => {
     const store = new CatalogStore();
     let resolveOldTools: ((tools: ServerToolInfo[]) => void) | undefined;
     const oldRuntime = createRuntimeStub(
@@ -227,31 +89,147 @@ describe("CatalogStore preload timeouts", () => {
     await vi.waitFor(() => {
       expect(resolveOldTools).toBeTypeOf("function");
     });
-
     store.clear();
-    await expect(store.getBasicCatalog(newRuntime)).resolves.toMatchObject({
-      tools: [expect.objectContaining({ selector: "alpha.new_lookup" })],
-    });
+    await store.getBasicCatalog(newRuntime);
 
     resolveOldTools?.([demoTool("alpha", "old_lookup")]);
     await oldLoad;
-
     expect(store.getCachedToolsForServer("alpha")).toEqual([
       expect.objectContaining({ selector: "alpha.new_lookup" }),
     ]);
   });
 });
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+describe("CatalogService exposure discovery", () => {
+  it("shares one overall cold-start deadline while discovery continues", async () => {
+    const resolvers = new Map<string, (tools: ServerToolInfo[]) => void>();
+    const listTools = vi.fn(
+      (server: string) =>
+        new Promise<ServerToolInfo[]>((resolve) => {
+          resolvers.set(server, resolve);
+        }),
+    );
+    const runtime = createRuntimeStub(listTools, ["alpha", "beta"]);
+    const service = new CatalogService();
+
+    const first = await service.prepareSchemaCatalogs(
+      runtime,
+      ["alpha", "beta"],
+      5,
+    );
+    expect(first.byServer.size).toBe(0);
+    expect(first.pendingServers).toEqual(["alpha", "beta"]);
+    expect(listTools).toHaveBeenCalledTimes(2);
+
+    resolvers.get("alpha")?.([schemaTool("alpha", "lookup")]);
+    resolvers.get("beta")?.([schemaTool("beta", "lookup")]);
+    await vi.waitFor(() => {
+      expect(
+        service.store.getCachedToolsForServer("alpha", {
+          requireSchema: true,
+        }),
+      ).toHaveLength(1);
+      expect(
+        service.store.getCachedToolsForServer("beta", {
+          requireSchema: true,
+        }),
+      ).toHaveLength(1);
+    });
+
+    const second = await service.prepareSchemaCatalogs(
+      runtime,
+      ["alpha", "beta"],
+      5,
+    );
+    expect(second.byServer.get("alpha")).toEqual([
+      expect.objectContaining({ selector: "alpha.lookup" }),
+    ]);
+    expect(second.byServer.get("beta")).toEqual([
+      expect.objectContaining({ selector: "beta.lookup" }),
+    ]);
+    expect(listTools).toHaveBeenCalledTimes(2);
   });
-}
+
+  it("serves expired schemas immediately while refreshing them", async () => {
+    let now = 1_000;
+    const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    let resolveRefresh: ((tools: ServerToolInfo[]) => void) | undefined;
+    const listTools = vi
+      .fn<Runtime["listTools"]>()
+      .mockResolvedValueOnce([schemaTool("alpha", "old_lookup")])
+      .mockImplementationOnce(
+        () =>
+          new Promise<ServerToolInfo[]>((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+    const runtime = createRuntimeStub(listTools);
+    const service = new CatalogService();
+
+    try {
+      await service.prepareSchemaCatalogs(runtime, ["alpha"], 100);
+      now += CATALOG_TTL_MS + 1;
+
+      const stale = await service.prepareSchemaCatalogs(
+        runtime,
+        ["alpha"],
+        100,
+      );
+      expect(stale.staleServers).toEqual(["alpha"]);
+      expect(stale.byServer.get("alpha")).toEqual([
+        expect.objectContaining({ selector: "alpha.old_lookup" }),
+      ]);
+      expect(listTools).toHaveBeenCalledTimes(2);
+
+      resolveRefresh?.([schemaTool("alpha", "new_lookup")]);
+      await vi.waitFor(() => {
+        expect(
+          service.store.getCachedToolsForServer("alpha", {
+            requireSchema: true,
+          }),
+        ).toEqual([expect.objectContaining({ selector: "alpha.new_lookup" })]);
+      });
+    } finally {
+      dateSpy.mockRestore();
+    }
+  });
+
+  it("records discovery failures and clears them after a successful retry", async () => {
+    const listTools = vi
+      .fn<Runtime["listTools"]>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce([schemaTool("alpha", "lookup")]);
+    const runtime = createRuntimeStub(listTools);
+    const service = new CatalogService();
+
+    const failed = await service.prepareSchemaCatalogs(runtime, ["alpha"], 100);
+    expect(failed.warnings).toEqual(["alpha: offline"]);
+    expect(service.getServerStatus("alpha")).toEqual({
+      error: "offline",
+      state: "cold",
+    });
+
+    const recovered = await service.prepareSchemaCatalogs(
+      runtime,
+      ["alpha"],
+      100,
+    );
+    expect(recovered.warnings).toEqual([]);
+    expect(service.getServerStatus("alpha")).toEqual({ state: "fresh" });
+  });
+});
 
 function demoTool(server: string, name: string): ServerToolInfo {
   return {
     name,
     description: `${server}.${name}`,
+  };
+}
+
+function schemaTool(server: string, name: string): ServerToolInfo {
+  return {
+    ...demoTool(server, name),
+    inputSchema: { type: "object", properties: {} },
   };
 }
 

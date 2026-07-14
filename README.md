@@ -1,6 +1,6 @@
 # 🧳 pi-mcporter
 
-Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) through one stable tool (`mcporter`), powered by [MCPorter](https://github.com/openclaw/mcporter).
+Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) through a stable `mcporter` proxy with optional native tool exposure, powered by [MCPorter](https://github.com/openclaw/mcporter).
 
 ## 🧠 Philosophy: CLI > MCP
 
@@ -11,7 +11,7 @@ Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/pack
 
 ## ✨ Why use this package
 
-- Keeps context small: one stable `mcporter` tool instead of exposing many MCP tools
+- Starts with one stable `mcporter` proxy and lets you opt selected MCP tools into richer exposure
 - Uses your MCPorter config/runtime as source of truth
 - Supports discovery (`search`), schema help (`describe`), and execution (`call`)
 - Returns useful error hints for auth/offline/http/stdio failures
@@ -102,48 +102,49 @@ describe linear.create_issue   →  learn required fields: title, teamId
 call linear.create_issue       →  execute with those fields
 ```
 
-In practice pi follows this pattern automatically. With `mode: "preload"` the catalog is warmed in the background, so pi can often skip `search`/`describe` and jump straight to `call`.
+In practice, pi follows this pattern automatically. The `match` and `native` exposure levels can skip some or all of these discovery steps for tools you use often.
 
-## 🔥 Modes & context preloading
+## 🔥 Exposure levels
 
-The `mode` setting controls what the agent already knows about your MCP servers at the start of each turn. In every mode only the single `mcporter` tool is exposed; the mode only changes how much catalog metadata lands in the system prompt:
+The exposure level controls how much the model can see before it uses the `mcporter` proxy. The default is `index`.
 
-- `index` (default): appends a single line listing the reachable MCP server names. This costs a handful of tokens and tells the agent what exists, so it knows when reaching for `mcporter` is worth a `search`.
-- `lazy`: zero impact. Nothing is added to the context, and no runtime is created at startup; the agent discovers servers and tools entirely on demand. Configure this when you want pi-mcporter invisible until used.
-- `preload`: additionally syncs the server's tool catalog in the background and appends a compact "warmed selectors" block to the system prompt, with one line per tool (selector plus short description, capped at 40 entries across all preloaded servers). The agent can usually skip discovery and `call` directly. The sync never blocks the agent: on the very first turn the server still appears as a plain index entry, and the warmed selectors show up once the background sync completes.
+| Exposure | What the model sees | How calls work |
+| --- | --- | --- |
+| `on-demand` | No server or tool hint. | The model discovers and calls tools through `mcporter`. Exposure setup doesn't start the runtime. |
+| `index` | A stable list of MCP server names in the system prompt. | The model uses `mcporter` to search, describe, and call tools. |
+| `match` | The server index plus compact signatures for tools relevant to the current user prompt. | The signatures arrive as a hidden turn message, which avoids changing the system prompt for each query. Calls still use `mcporter`. |
+| `native` | Selected MCP tools as individual Pi tools. | Pi calls the MCP tool directly. The `mcporter` proxy remains available as a fallback when it is active. |
 
-Side by side, here is what the agent sees and does for the same request:
+`match` and `native` load schema metadata in the background at session start. On a cold turn, all servers share the configured discovery budget, which defaults to 2 seconds. When the proxy is active, a server that misses the budget remains an `index` entry for that turn while discovery continues. After a catalog entry reaches its five-minute freshness limit, pi-mcporter serves the stale in-memory entry while it refreshes it. The cache isn't written to disk.
 
-```
-mode: "index" (default)               mode: "preload"
-────────────────────────────────────  ────────────────────────────────────
-system prompt:                        system prompt:
-  MCP servers are reachable through     Warmed MCP selectors:
-  the mcporter tool: linear, slack.     - linear.create_issue — Create a…
-                                        - linear.list_issues — List issu…
-
-1. search "linear issue"              1. call linear.create_issue
-2. describe linear.create_issue
-3. call linear.create_issue
-```
-
-With `lazy` even the index line disappears: the agent has no idea which MCP servers exist until it tries `search`.
-
-The trade-off: `index` buys discoverability for a handful of tokens; `preload` spends system-prompt tokens on the selector list to save discovery round-trips on every request; `lazy` keeps the context untouched.
-
-`mode` can be set globally and overridden per server via `serverModes`. A good pattern is to preload the one or two servers you use constantly and hide noisy ones:
+You can set a default exposure for all servers and replace it per server. Native exposure is deliberately explicit: it is valid only in a server policy with a nonempty `includeTools` list. Use `["*"]` when you intend to expose every tool from that server.
 
 ```json
 {
-  "mode": "index",
-  "serverModes": {
-    "linear": "preload",
-    "playwright": "lazy"
+  "version": 1,
+  "defaultExposure": "index",
+  "servers": {
+    "linear": {
+      "exposure": "native",
+      "includeTools": ["list_*", "create_issue"],
+      "excludeTools": ["*_private"]
+    },
+    "slack": {
+      "exposure": "match",
+      "includeTools": ["search_*", "post_message"]
+    },
+    "playwright": {
+      "exposure": "on-demand"
+    }
   }
 }
 ```
 
-With this config Linear's tools appear as warmed selectors, playwright stays invisible until used, and every other server shows up in the one-line server index.
+Tool filters support `*` and `?`. Exclusions take precedence over inclusions. Filters affect only `match` and `native` exposure; every server tool remains reachable through the proxy.
+
+Native tools normally use the name `mcp__<server>__<tool>`. To stay compatible with providers that accept only `A-Z`, `a-z`, `0-9`, `_`, and `-` in names up to 64 characters, pi-mcporter normalizes unusual or long selectors and appends `__` plus the first 10 lowercase hexadecimal characters of the selector's SHA-256 hash. It skips name collisions and invalid input schemas and reports them through `/mcporter status`.
+
+If the `mcporter` proxy is inactive, pi-mcporter omits `index` and `match` context. Explicit native policies remain eligible, but those tools don't have a proxy fallback until you activate `mcporter` again.
 
 ## 🧰 Tool input (reference)
 
@@ -183,22 +184,65 @@ Example MCPorter config:
 }
 ```
 
-Configure only pi-specific orchestration in `~/.pi/agent/mcporter.json`:
+Configure only pi-specific exposure in these files:
+
+- Global: `<Pi agent directory>/mcporter.json`, normally `~/.pi/agent/mcporter.json`.
+- Project: `<cwd>/.pi/mcporter.json`.
+
+Every file must set `"version": 1`. Project scalar values override global values. A project server entry replaces the complete global entry for that server; fields within an entry don't merge. Set a project server entry to `null` to remove its inherited global policy.
+
+For example, a global file can define the defaults and common policies:
 
 ```json
 {
-  "timeoutMs": 30000,
-  "mode": "index",
-  "serverModes": {
-    "linear": "preload",
-    "playwright": "lazy"
+  "version": 1,
+  "defaultExposure": "index",
+  "callTimeoutMs": 30000,
+  "discoveryTimeoutMs": 2000,
+  "maxMatchedTools": 8,
+  "servers": {
+    "linear": {
+      "exposure": "native",
+      "includeTools": ["list_*", "get_*"]
+    },
+    "slack": {
+      "exposure": "match"
+    }
   }
 }
 ```
 
-- `timeoutMs`: optional default call timeout in milliseconds. Tool-level `timeoutMs` still overrides this per call.
-- `mode`: optional default catalog visibility mode (`lazy`, `index`, or `preload`, default `index`) for servers without a per-server override. See [Modes & context preloading](#-modes--context-preloading).
-- `serverModes`: optional per-server visibility overrides keyed by MCPorter server name. Values can be `lazy`, `index`, or `preload`.
+A project file can replace the Linear policy and remove the inherited Slack policy:
+
+```json
+{
+  "version": 1,
+  "maxMatchedTools": 5,
+  "servers": {
+    "linear": {
+      "exposure": "match",
+      "includeTools": ["get_*"]
+    },
+    "slack": null
+  }
+}
+```
+
+The settings are:
+
+- `defaultExposure`: The `on-demand`, `index`, or `match` policy for servers without an override. The default is `index`; `native` isn't valid as a default.
+- `callTimeoutMs`: The default MCP call timeout from 1 to 300,000 milliseconds. A proxy call's `timeoutMs` input still overrides it.
+- `discoveryTimeoutMs`: The overall cold discovery budget from 100 to 30,000 milliseconds. The default is 2,000.
+- `maxMatchedTools`: The maximum number of signatures in a `match` message, from 1 to 50. The default is 8.
+- `servers`: Per-server exposure policies keyed by the exact MCPorter server name.
+
+pi-mcporter re-reads both files at session start and before every agent request. Exposure changes therefore apply without reloading the extension. Native definitions that are no longer selected become inactive; Pi doesn't provide an API to unregister their retained definitions. A manual disable remains in effect while the corresponding native policy and schema stay unchanged.
+
+Validation is strict. An unknown key, unsupported version, invalid bound, or malformed policy disables `index`, `match`, and `native` enrichment for that project root. The `mcporter` proxy continues to work with the default call timeout, and pi-mcporter reports each distinct configuration error once.
+
+Run `/mcporter status` to inspect the resolved files, effective policies, cache state, discovery errors, and active native tools. The command doesn't start a cold MCP runtime.
+
+MCP tool descriptions and schema annotations come from third parties. pi-mcporter normalizes and bounds this metadata, marks it as untrusted, and tells the model not to follow embedded instructions.
 
 ## 🪄 Output behavior
 
@@ -213,7 +257,9 @@ Tool output follows pi's native expand/collapse behavior:
 
 - **Unknown server/tool**: run `npx mcporter list` and `npx mcporter list <server>` to verify names.
 - **Auth issues**: run `npx mcporter auth <server>`.
-- **Slow calls**: increase `timeoutMs` in `~/.pi/agent/mcporter.json` or override `timeoutMs` per tool call.
+- **Slow calls**: Increase `callTimeoutMs` in a pi-mcporter configuration file or override `timeoutMs` per proxy call.
+- **Missing matched or native tools**: Run `/mcporter status` to check filters, discovery progress, and schema errors.
+- **Invalid exposure configuration**: Fix the reported error. Version 1 rejects unknown and legacy keys, including `mode`, `serverModes`, and top-level `timeoutMs`.
 - **Config not found**: create `~/.mcporter/mcporter.json` or `config/mcporter.json`, or export `MCPORTER_CONFIG=<path>`.
 - **Truncated output**: the response includes a temp file path with full output.
 
