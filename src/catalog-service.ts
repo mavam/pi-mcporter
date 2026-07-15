@@ -52,6 +52,9 @@ export class CatalogService {
       const load = this.trackSchemaLoad(runtime, server).then(() => undefined);
       if (state === "stale") {
         staleCandidates.push(server);
+        // Stale metadata is served without waiting for the refresh, but the
+        // background promise still needs a rejection handler.
+        void load.catch(() => {});
       } else {
         coldLoads.push(load);
       }

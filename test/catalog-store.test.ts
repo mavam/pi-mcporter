@@ -220,6 +220,40 @@ describe("CatalogService exposure discovery", () => {
     }
   });
 
+  it("handles failed stale refreshes in the background", async () => {
+    let now = 1_000;
+    const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const listTools = vi
+      .fn<Runtime["listTools"]>()
+      .mockResolvedValueOnce([schemaTool("alpha", "old_lookup")])
+      .mockRejectedValueOnce(new Error("refresh failed"));
+    const runtime = createRuntimeStub(listTools);
+    const service = new CatalogService();
+
+    try {
+      await service.prepareSchemaCatalogs(runtime, ["alpha"], 100);
+      now += CATALOG_TTL_MS + 1;
+
+      const stale = await service.prepareSchemaCatalogs(
+        runtime,
+        ["alpha"],
+        100,
+      );
+      expect(stale.staleServers).toEqual(["alpha"]);
+      expect(stale.byServer.get("alpha")).toEqual([
+        expect.objectContaining({ selector: "alpha.old_lookup" }),
+      ]);
+      await vi.waitFor(() => {
+        expect(service.getServerStatus("alpha")).toEqual({
+          error: "refresh failed",
+          state: "stale",
+        });
+      });
+    } finally {
+      dateSpy.mockRestore();
+    }
+  });
+
   it("records discovery failures and clears them after a successful retry", async () => {
     const listTools = vi
       .fn<Runtime["listTools"]>()
