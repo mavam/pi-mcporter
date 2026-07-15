@@ -212,7 +212,7 @@ function rankPromptTools(tools: CatalogTool[], prompt: string): CatalogTool[] {
   const exact = rankTools(tools, prompt);
   const scores = new Map<string, number>();
   exact.forEach((tool, index) => {
-    scores.set(tool.selector, 10_000 - index);
+    scores.set(tool.selector, Math.max(1, 10_000 - index));
   });
 
   const tokens = [
@@ -225,7 +225,10 @@ function rankPromptTools(tools: CatalogTool[], prompt: string): CatalogTool[] {
   ];
   for (const token of tokens) {
     rankTools(tools, token).forEach((tool, index) => {
-      scores.set(tool.selector, (scores.get(tool.selector) ?? 0) + 100 - index);
+      scores.set(
+        tool.selector,
+        (scores.get(tool.selector) ?? 0) + Math.max(1, 100 - index),
+      );
     });
   }
 

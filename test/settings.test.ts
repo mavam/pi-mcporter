@@ -64,6 +64,15 @@ describe("mcporter settings", () => {
     });
   });
 
+  it("trims server names", () => {
+    const settings = normalizeMcporterSettings({
+      version: 1,
+      servers: { " linear ": { exposure: "index" } },
+    });
+
+    expect(Object.keys(settings.servers)).toEqual(["linear"]);
+  });
+
   it("treats every server name as an own data key", () => {
     const settings = normalizeMcporterSettings(
       JSON.parse('{"version":1,"servers":{"__proto__":{"exposure":"index"}}}'),

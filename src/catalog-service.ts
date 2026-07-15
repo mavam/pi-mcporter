@@ -41,7 +41,7 @@ export class CatalogService {
   ): Promise<PreparedSchemaCatalogs> {
     const requested = uniqueSorted(servers);
     const coldLoads: Promise<void>[] = [];
-    const staleServers: string[] = [];
+    const staleCandidates: string[] = [];
 
     for (const server of requested) {
       const state = this.store.getSchemaCacheState(server);
@@ -51,13 +51,17 @@ export class CatalogService {
 
       const load = this.trackSchemaLoad(runtime, server).then(() => undefined);
       if (state === "stale") {
-        staleServers.push(server);
+        staleCandidates.push(server);
       } else {
         coldLoads.push(load);
       }
     }
 
     await waitForAllWithin(coldLoads, timeoutMs);
+
+    const staleServers = staleCandidates.filter(
+      (server) => this.store.getSchemaCacheState(server) !== "fresh",
+    );
 
     const byServer = new Map<string, CatalogTool[]>();
     const pendingServers: string[] = [];

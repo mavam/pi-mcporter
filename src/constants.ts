@@ -1,4 +1,5 @@
 export const CATALOG_TTL_MS = 5 * 60 * 1000;
+export const CATALOG_FAILURE_RETRY_MS = 30 * 1000;
 export const DEFAULT_DISCOVERY_TIMEOUT_MS = 2_000;
 export const MIN_DISCOVERY_TIMEOUT_MS = 100;
 export const MAX_DISCOVERY_TIMEOUT_MS = 30_000;

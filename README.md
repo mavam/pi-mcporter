@@ -115,7 +115,7 @@ The exposure level controls how much the model can see before it uses the `mcpor
 | `match` | The server index plus compact signatures for tools relevant to the current user prompt. | The signatures arrive as a hidden turn message, which avoids changing the system prompt for each query. Calls still use `mcporter`. |
 | `native` | Selected MCP tools as individual Pi tools. | Pi calls the MCP tool directly. The `mcporter` proxy remains available as a fallback when it is active. |
 
-`match` and `native` load schema metadata in the background at session start. On a cold turn, all servers share the configured discovery budget, which defaults to 2 seconds. When the proxy is active, a server that misses the budget remains an `index` entry for that turn while discovery continues. After a catalog entry reaches its five-minute freshness limit, pi-mcporter serves the stale in-memory entry while it refreshes it. The cache isn't written to disk.
+`match` and `native` load schema metadata in the background at session start. On a cold turn, all servers share the configured discovery budget, which defaults to 2 seconds. When the proxy is active, a server that misses the budget remains an `index` entry for that turn while discovery continues. After a catalog entry reaches its five-minute freshness limit, pi-mcporter serves the stale in-memory entry while it refreshes it; failed catalog fetches retry within 30 seconds. The cache isn't written to disk. pi-mcporter skips the hidden `match` message when its content is identical to the previous turn's, so repeated prompts don't accumulate duplicate context.
 
 You can set a default exposure for all servers and replace it per server. Native exposure is deliberately explicit: it is valid only in a server policy with a nonempty `includeTools` list. Use `["*"]` when you intend to expose every tool from that server.
 
@@ -236,7 +236,7 @@ The settings are:
 - `maxMatchedTools`: The maximum number of signatures in a `match` message, from 1 to 50. The default is 8.
 - `servers`: Per-server exposure policies keyed by the exact MCPorter server name.
 
-pi-mcporter re-reads both files at session start and before every agent request. Exposure changes therefore apply without reloading the extension. Native definitions that are no longer selected become inactive; Pi doesn't provide an API to unregister their retained definitions. A manual disable remains in effect while the corresponding native policy and schema stay unchanged.
+pi-mcporter re-reads both files at session start and before every agent request. Exposure changes therefore apply without reloading the extension. Native definitions that are no longer selected become inactive; Pi doesn't provide an API to unregister their retained definitions. A manual disable remains in effect while the corresponding native policy and schema stay unchanged. If refreshing a changed native definition fails, the previous definition stays active and the failure appears in `/mcporter status`.
 
 Validation is strict. An unknown key, unsupported version, invalid bound, or malformed policy disables `index`, `match`, and `native` enrichment for that project root. The `mcporter` proxy continues to work with the default call timeout, and pi-mcporter reports each distinct configuration error once.
 

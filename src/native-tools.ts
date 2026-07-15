@@ -44,7 +44,6 @@ export class NativeToolManager {
     ActivationPreference
   >();
   private readonly registered = new Map<string, RegisteredNativeTool>();
-  private readonly emittedDiagnostics = new Set<string>();
   private desiredNames = new Set<string>();
   private diagnostics: string[] = [];
 
@@ -114,9 +113,16 @@ export class NativeToolManager {
           });
           allConfiguredNames.add(name);
         } catch (error) {
-          diagnostics.push(
-            `${tool.selector}: failed to register native tool: ${errorMessage(error)}.`,
-          );
+          if (previous) {
+            diagnostics.push(
+              `${tool.selector}: failed to refresh native tool '${name}' (${errorMessage(error)}); keeping the previous definition active.`,
+            );
+            nextDesired.add(name);
+          } else {
+            diagnostics.push(
+              `${tool.selector}: failed to register native tool: ${errorMessage(error)}.`,
+            );
+          }
           continue;
         }
       }
@@ -126,8 +132,13 @@ export class NativeToolManager {
 
     this.reconcileActiveTools(nextDesired, diagnostics);
     this.desiredNames = nextDesired;
+    // Report diagnostics absent from the previous reconcile. A persisting
+    // condition is reported once, but one that resolves and recurs is new.
+    const previousDiagnostics = new Set(this.diagnostics);
     this.diagnostics = diagnostics;
-    return this.takeNewDiagnostics(diagnostics);
+    return diagnostics.filter(
+      (diagnostic) => !previousDiagnostics.has(diagnostic),
+    );
   }
 
   getStatus(): NativeToolStatus {
@@ -191,14 +202,6 @@ export class NativeToolManager {
         `failed to reconcile active native tools: ${errorMessage(error)}.`,
       );
     }
-  }
-
-  private takeNewDiagnostics(diagnostics: string[]): string[] {
-    return diagnostics.filter((diagnostic) => {
-      if (this.emittedDiagnostics.has(diagnostic)) return false;
-      this.emittedDiagnostics.add(diagnostic);
-      return true;
-    });
   }
 }
 

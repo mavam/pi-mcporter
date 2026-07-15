@@ -166,6 +166,50 @@ describe("createMcporterController", () => {
     }
   });
 
+  it("skips a hidden match message whose content is already in context", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "match",
+      maxMatchedTools: 1,
+    });
+    const runtime = createRuntimeStub(
+      async () => [
+        demoTool("list_issues", "List Linear issues"),
+        demoTool("create_issue", "Create a Linear issue"),
+      ],
+      ["linear"],
+    );
+
+    try {
+      const controller = createController(
+        vi.fn().mockResolvedValue(runtime),
+        fixture.agentDir,
+      );
+      const first = await controller.prepareTurn({
+        prompt: "Please list my Linear issues",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      const repeated = await controller.prepareTurn({
+        prompt: "Please list my Linear issues",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      const different = await controller.prepareTurn({
+        prompt: "Create a new Linear issue",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+
+      expect(first.matchMessage).toContain("linear.list_issues");
+      expect(repeated.matchMessage).toBeUndefined();
+      expect(repeated.matchedSelectors).toEqual(first.matchedSelectors);
+      expect(different.matchMessage).toContain("linear.create_issue");
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("starts match discovery in the background at session start", async () => {
     const fixture = await createSettingsFixture({
       version: 1,

@@ -43,6 +43,10 @@ export function toErrorMessage(error: unknown): string {
   }
 }
 
+export function normalizeRootDir(rootDir?: string): string {
+  return rootDir?.trim() || process.cwd();
+}
+
 export function cleanSingleLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }

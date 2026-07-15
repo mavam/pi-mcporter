@@ -14,6 +14,9 @@ export function sanitizeMetadataText(text: string, maxLength: number): string {
     .replace(CONTROL_CHARACTERS, " ")
     .replace(DIRECTIONAL_CONTROLS, "")
     .replace(/\s+/gu, " ")
+    // Metadata must not be able to reproduce the exact untrusted-content
+    // fence markers and escape them early.
+    .replace(/(untrusted)\s+(mcp)/giu, "$1-$2")
     .trim();
   return cleaned.length <= maxLength
     ? cleaned

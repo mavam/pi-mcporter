@@ -16,7 +16,7 @@ import {
   type DefaultMcporterExposure,
   type ServerExposurePolicy,
 } from "./exposure.js";
-import { isPlainObject, toErrorMessage } from "./helpers.js";
+import { isPlainObject, normalizeRootDir, toErrorMessage } from "./helpers.js";
 
 export const MCPORTER_SETTINGS_VERSION = 1 as const;
 
@@ -97,7 +97,7 @@ export function normalizeMcporterSettings(
 export async function loadResolvedMcporterConfig(
   options: SettingsLoaderOptions = {},
 ): Promise<ResolvedMcporterConfig> {
-  const rootDir = options.rootDir?.trim() || process.cwd();
+  const rootDir = normalizeRootDir(options.rootDir);
   const readFileFn = options.readFileFn ?? readFile;
   const { globalPath, projectPath } = resolveMcporterSettingsPaths(
     rootDir,
@@ -247,8 +247,9 @@ function normalizeServers(
   }
 
   const servers: Record<string, ServerExposurePolicy | null> = {};
-  for (const [server, rawPolicy] of Object.entries(value)) {
-    if (server.trim().length === 0) {
+  for (const [rawServer, rawPolicy] of Object.entries(value)) {
+    const server = rawServer.trim();
+    if (server.length === 0) {
       throw new Error(`${source}: server names must not be empty.`);
     }
     if (rawPolicy === null) {

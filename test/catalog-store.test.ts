@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Runtime, ServerToolInfo } from "mcporter";
 import { CatalogService } from "../src/catalog-service.ts";
 import { CatalogStore } from "../src/catalog-store.ts";
-import { CATALOG_TTL_MS } from "../src/constants.ts";
+import { CATALOG_FAILURE_RETRY_MS, CATALOG_TTL_MS } from "../src/constants.ts";
 
 describe("CatalogStore", () => {
   it("coalesces concurrent schema reads", async () => {
@@ -67,6 +67,32 @@ describe("CatalogStore", () => {
       ]);
       expect(listCalls.get("alpha")).toBe(2);
       expect(listCalls.get("beta")).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a failed aggregate snapshot within the failure window", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const store = new CatalogStore();
+      const listTools = vi
+        .fn<Runtime["listTools"]>()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValue([demoTool("alpha", "lookup")]);
+      const runtime = createRuntimeStub(listTools, ["alpha"]);
+
+      const failed = await store.getBasicCatalog(runtime);
+      expect(failed.warnings).toEqual(["alpha: offline"]);
+      expect(failed.tools).toEqual([]);
+
+      vi.advanceTimersByTime(CATALOG_FAILURE_RETRY_MS + 1);
+      const recovered = await store.getBasicCatalog(runtime);
+      expect(recovered.warnings).toEqual([]);
+      expect(recovered.tools).toEqual([
+        expect.objectContaining({ selector: "alpha.lookup" }),
+      ]);
     } finally {
       vi.useRealTimers();
     }

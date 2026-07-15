@@ -10,7 +10,7 @@ import {
   resolveServerExposure,
   type ServerExposurePolicy,
 } from "./exposure.js";
-import { textContent, toErrorMessage } from "./helpers.js";
+import { normalizeRootDir, textContent, toErrorMessage } from "./helpers.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
 import type { NativeToolStatus } from "./native-tools.js";
 import { PromptCatalogProvider } from "./prompt-catalog-provider.js";
@@ -69,6 +69,7 @@ export function createMcporterController(
   const emittedWarnings = new Set<string>();
   const configFingerprints = new Map<string, string>();
   const lastExposureState = new Map<string, LastExposureState>();
+  const lastMatchEmissions = new Map<string, string>();
 
   const runtimeSession = new RuntimeSession({
     createRuntimeFn: options.createRuntimeFn,
@@ -81,7 +82,8 @@ export function createMcporterController(
   );
 
   async function loadConfig(rootDir?: string): Promise<ConfigLoadState> {
-    const normalizedRoot = normalizeRoot(rootDir);
+    const normalizedRoot = normalizeRootDir(rootDir);
+    const previousFingerprint = configFingerprints.get(normalizedRoot);
     try {
       const config = await loadConfigFn({
         rootDir: normalizedRoot,
@@ -89,22 +91,29 @@ export function createMcporterController(
           ? { agentDirectory: options.agentDirectory }
           : {}),
       });
-      const previousFingerprint = configFingerprints.get(normalizedRoot);
-      if (
-        previousFingerprint !== undefined &&
-        previousFingerprint !== config.fingerprint
-      ) {
-        lastExposureState.delete(normalizedRoot);
-      }
-      configFingerprints.set(normalizedRoot, config.fingerprint);
+      recordConfigTransition(normalizedRoot, config.fingerprint);
       return { config, rootDir: normalizedRoot };
     } catch (error) {
-      configFingerprints.delete(normalizedRoot);
+      const message = toErrorMessage(error);
+      recordConfigTransition(normalizedRoot, `invalid:${message}`);
       lastExposureState.delete(normalizedRoot);
       return {
-        error: toErrorMessage(error),
+        error: message,
         rootDir: normalizedRoot,
       };
+    }
+
+    // A changed fingerprint invalidates warning dedup so that fixing and
+    // re-breaking the configuration reports the recurring error again.
+    function recordConfigTransition(root: string, fingerprint: string): void {
+      if (
+        previousFingerprint !== undefined &&
+        previousFingerprint !== fingerprint
+      ) {
+        lastExposureState.delete(root);
+        emittedWarnings.clear();
+      }
+      configFingerprints.set(root, fingerprint);
     }
   }
 
@@ -113,6 +122,9 @@ export function createMcporterController(
     proxyActive: boolean,
   ): Promise<string[]> {
     const loaded = await loadConfig(rootDir);
+    // A new pi session starts a new conversation, so earlier hidden match
+    // messages are no longer in context.
+    lastMatchEmissions.clear();
     if (!loaded.config) {
       return takeNewWarnings([invalidConfigWarning(loaded)]);
     }
@@ -157,13 +169,21 @@ export function createMcporterController(
         staleServers: prepared.staleServers,
         warnings: prepared.warnings,
       });
+      // Hidden match messages persist in the conversation, so skip a message
+      // whose content is already in context from an earlier turn.
+      let matchMessage = prepared.matchMessage;
+      if (matchMessage !== undefined) {
+        if (lastMatchEmissions.get(loaded.rootDir) === matchMessage) {
+          matchMessage = undefined;
+        } else {
+          lastMatchEmissions.set(loaded.rootDir, matchMessage);
+        }
+      }
       return {
         configFingerprint: loaded.config.fingerprint,
         matchedSelectors: prepared.matchedTools.map((tool) => tool.selector),
         nativeTools: prepared.nativeTools,
-        ...(prepared.matchMessage
-          ? { matchMessage: prepared.matchMessage }
-          : {}),
+        ...(matchMessage ? { matchMessage } : {}),
         ...(prepared.systemPromptAppend
           ? { systemPromptAppend: prepared.systemPromptAppend }
           : {}),
@@ -318,6 +338,7 @@ export function createMcporterController(
   async function shutdown(): Promise<void> {
     configFingerprints.clear();
     lastExposureState.clear();
+    lastMatchEmissions.clear();
     emittedWarnings.clear();
     await runtimeSession.shutdown();
   }
@@ -332,10 +353,6 @@ export function createMcporterController(
     shutdown,
     startSession,
   };
-}
-
-function normalizeRoot(rootDir: string | undefined): string {
-  return rootDir?.trim() || process.cwd();
 }
 
 function invalidConfigWarning(loaded: ConfigLoadState): string {

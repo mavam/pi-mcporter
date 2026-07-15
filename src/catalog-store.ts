@@ -1,5 +1,5 @@
 import type { Runtime, ServerToolInfo } from "mcporter";
-import { CATALOG_TTL_MS } from "./constants.js";
+import { CATALOG_FAILURE_RETRY_MS, CATALOG_TTL_MS } from "./constants.js";
 import { toErrorMessage } from "./helpers.js";
 import type { Cached, CatalogSnapshot, CatalogTool } from "./types.js";
 
@@ -146,10 +146,16 @@ export class CatalogStore {
           sourceFetchedAts.length > 0
             ? Math.min(...sourceFetchedAts)
             : loadStartedAt;
-        const expiresAt =
+        const fullExpiresAt =
           sourceExpiresAts.length > 0
             ? Math.min(...sourceExpiresAts)
             : fetchedAt + CATALOG_TTL_MS;
+        // Retry failed servers sooner than the freshness limit so a transient
+        // outage does not blank the catalog for the full TTL.
+        const expiresAt =
+          warnings.length > 0
+            ? Math.min(fullExpiresAt, loadStartedAt + CATALOG_FAILURE_RETRY_MS)
+            : fullExpiresAt;
         const snapshot: CatalogSnapshot = {
           fetchedAt,
           servers,
