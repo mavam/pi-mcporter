@@ -132,9 +132,6 @@ export function createMcporterController(
     projectTrusted = false,
   ): Promise<string[]> {
     const loaded = await loadConfig(rootDir, projectTrusted);
-    // A new pi session starts a new conversation, so earlier hidden match
-    // messages are no longer in context.
-    lastMatchEmissions.clear();
     if (!loaded.config) {
       return takeNewWarnings([invalidConfigWarning(loaded)]);
     }
@@ -354,6 +351,14 @@ export function createMcporterController(
     });
   }
 
+  function resetMatchEmissions(rootDir?: string): void {
+    if (rootDir === undefined) {
+      lastMatchEmissions.clear();
+      return;
+    }
+    lastMatchEmissions.delete(normalizeRootDir(rootDir));
+  }
+
   async function shutdown(): Promise<void> {
     configFingerprints.clear();
     lastExposureState.clear();
@@ -368,6 +373,7 @@ export function createMcporterController(
     executeNative,
     formatStatus,
     prepareTurn,
+    resetMatchEmissions,
     resolveCallTimeout,
     shutdown,
     startSession,

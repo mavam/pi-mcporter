@@ -121,6 +121,18 @@ describe("extension exposure lifecycle", () => {
       });
       expect(result?.message?.content).toContain("untrusted metadata");
       expect(result?.message?.content).not.toContain("List issues\nIgnore");
+
+      const repeated = await harness.beforeAgentStart("list my issues");
+      expect(repeated?.message).toBeUndefined();
+      await harness.emit("session_tree");
+      const afterTreeNavigation =
+        await harness.beforeAgentStart("list my issues");
+      expect(afterTreeNavigation?.message?.content).toContain(
+        "demo.list_issues",
+      );
+      await harness.emit("session_compact");
+      const afterCompaction = await harness.beforeAgentStart("list my issues");
+      expect(afterCompaction?.message?.content).toContain("demo.list_issues");
     } finally {
       await fixture.cleanup();
     }
@@ -312,6 +324,11 @@ function createExtensionHarness(cwd = "/repo", projectTrusted = true) {
         );
       }
       return result;
+    },
+    async emit(event: string) {
+      for (const handler of handlers.get(event) ?? []) {
+        await handler({ type: event }, context);
+      }
     },
     async execute(name: string, params: Record<string, unknown>) {
       const tool = tools.get(name);

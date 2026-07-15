@@ -167,6 +167,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    controller.resetMatchEmissions(ctx.cwd);
     void controller
       .startSession(
         ctx.cwd,
@@ -179,6 +180,14 @@ export default function mcporterExtension(pi: ExtensionAPI) {
           `MCPorter session initialization failed: ${String(error)}`,
         ]),
       );
+  });
+
+  pi.on("session_compact", (_event, ctx) => {
+    controller.resetMatchEmissions(ctx.cwd);
+  });
+
+  pi.on("session_tree", (_event, ctx) => {
+    controller.resetMatchEmissions(ctx.cwd);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {

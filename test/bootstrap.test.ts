@@ -195,6 +195,12 @@ describe("createMcporterController", () => {
         proxyActive: true,
         rootDir: fixture.rootDir,
       });
+      controller.resetMatchEmissions(fixture.rootDir);
+      const afterContextReset = await controller.prepareTurn({
+        prompt: "Please list my Linear issues",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
       const different = await controller.prepareTurn({
         prompt: "Create a new Linear issue",
         proxyActive: true,
@@ -204,6 +210,7 @@ describe("createMcporterController", () => {
       expect(first.matchMessage).toContain("linear.list_issues");
       expect(repeated.matchMessage).toBeUndefined();
       expect(repeated.matchedSelectors).toEqual(first.matchedSelectors);
+      expect(afterContextReset.matchMessage).toContain("linear.list_issues");
       expect(different.matchMessage).toContain("linear.create_issue");
     } finally {
       await fixture.cleanup();
