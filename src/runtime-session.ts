@@ -1,4 +1,5 @@
 import { createRuntime, type Runtime } from "mcporter";
+import { normalizeRootDir } from "./helpers.js";
 
 class StaleRuntimeSessionError extends Error {
   constructor() {
@@ -30,7 +31,7 @@ export class RuntimeSession {
   }
 
   async getRuntime(rootDir?: string): Promise<Runtime> {
-    const key = normalizeRuntimeKey(rootDir);
+    const key = normalizeRootDir(rootDir);
     const requestShutdownEpoch = this.shutdownEpoch;
     return await this.enqueueTransition(async () => {
       if (requestShutdownEpoch !== this.shutdownEpoch) {
@@ -51,7 +52,7 @@ export class RuntimeSession {
 
       const generation = this.generation;
       const created = await this.createRuntimeFn({
-        ...(rootDir ? { rootDir } : {}),
+        rootDir: key,
         clientInfo: {
           name: "pi-mcporter",
           version: this.packageVersion,
@@ -65,6 +66,12 @@ export class RuntimeSession {
       this.runtimeKey = key;
       return created;
     });
+  }
+
+  peekRuntime(rootDir?: string): Runtime | undefined {
+    return this.runtimeKey === normalizeRootDir(rootDir)
+      ? this.runtime
+      : undefined;
   }
 
   async shutdown(): Promise<void> {
@@ -91,8 +98,4 @@ export class RuntimeSession {
     );
     return result;
   }
-}
-
-function normalizeRuntimeKey(rootDir: string | undefined): string {
-  return rootDir?.trim() ?? "";
 }

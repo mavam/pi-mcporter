@@ -5,7 +5,6 @@ import { handleSearchAction } from "../src/actions/search.ts";
 import { CatalogStore } from "../src/catalog-store.ts";
 import mcporterExtension, { __test__ } from "../src/index.ts";
 import { formatCallOutput, summarizeCallOutput } from "../src/output.ts";
-import { preloadCatalog } from "../src/startup.ts";
 
 beforeAll(() => {
   initTheme("dark", false);
@@ -394,76 +393,26 @@ describe("call args preview formatting", () => {
   });
 });
 
-describe("mode resolution", () => {
-  it("defaults to index", () => {
-    expect(__test__.resolveMcporterMode(undefined)).toBe("index");
+describe("exposure resolution", () => {
+  it("recognizes the four exposure levels", () => {
+    expect(__test__.isMcporterExposure("on-demand")).toBe(true);
+    expect(__test__.isMcporterExposure("index")).toBe(true);
+    expect(__test__.isMcporterExposure("match")).toBe(true);
+    expect(__test__.isMcporterExposure("native")).toBe(true);
+    expect(__test__.isMcporterExposure("preload")).toBe(false);
   });
 
-  it("accepts lazy, index, and preload", () => {
-    expect(__test__.resolveMcporterMode("lazy")).toBe("lazy");
-    expect(__test__.resolveMcporterMode("index")).toBe("index");
-    expect(__test__.resolveMcporterMode("preload")).toBe("preload");
+  it("prefers a per-server policy", () => {
+    expect(
+      __test__.resolveServerExposure("index", { exposure: "native" }),
+    ).toBe("native");
+    expect(__test__.resolveServerExposure("match", undefined)).toBe("match");
   });
 
-  it("falls back to index for unknown values", () => {
-    expect(__test__.resolveMcporterMode("surprise")).toBe("index");
-  });
-
-  it("prefers the per-server mode over the global mode", () => {
-    expect(__test__.resolveServerMode("lazy", "preload")).toBe("preload");
-    expect(__test__.resolveServerMode("preload", "lazy")).toBe("lazy");
-  });
-
-  it("falls back to the global mode without a per-server override", () => {
-    expect(__test__.resolveServerMode("preload", undefined)).toBe("preload");
-  });
-});
-
-describe("startup preload", () => {
-  it("warms the basic catalog", async () => {
-    const seenOptions: Array<{ includeSchema?: boolean }> = [];
-    const runtime = createRuntimeStub(
-      async (server, options) => {
-        seenOptions.push({ includeSchema: options?.includeSchema });
-        if (server === "beta") {
-          throw new Error("offline");
-        }
-        return [demoTool(server, "list_items")];
-      },
-      ["alpha", "beta"],
-    );
-
-    const summary = await preloadCatalog(runtime, new CatalogStore());
-
-    expect(summary.warmedServers).toEqual(["alpha"]);
-    expect(summary.warnings).toEqual(["beta: offline"]);
-    expect(seenOptions).toEqual([
-      { includeSchema: false },
-      { includeSchema: false },
-    ]);
-  });
-
-  it("only performs basic metadata reads", async () => {
-    const seenOptions: Array<{ includeSchema?: boolean; server: string }> = [];
-    const runtime = createRuntimeStub(
-      async (server, options) => {
-        seenOptions.push({
-          server,
-          includeSchema: options?.includeSchema,
-        });
-        return [demoTool(server, "list_items")];
-      },
-      ["alpha", "beta", "gamma"],
-    );
-
-    const summary = await preloadCatalog(runtime, new CatalogStore());
-
-    expect(summary.warmedServers).toEqual(["alpha", "beta", "gamma"]);
-    expect(seenOptions).toEqual([
-      { server: "alpha", includeSchema: false },
-      { server: "beta", includeSchema: false },
-      { server: "gamma", includeSchema: false },
-    ]);
+  it("matches glob filters with star and question mark", () => {
+    expect(__test__.matchesToolPattern("list_issues", "list_*")).toBe(true);
+    expect(__test__.matchesToolPattern("get_1", "get_?")).toBe(true);
+    expect(__test__.matchesToolPattern("get_12", "get_?")).toBe(false);
   });
 });
 

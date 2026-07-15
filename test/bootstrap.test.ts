@@ -7,8 +7,6 @@ import { createMcporterController } from "../src/bootstrap.ts";
 
 describe("createMcporterController", () => {
   it("closes runtimes that finish creating after shutdown", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const previousHome = process.env.HOME;
     const runtime = createRuntimeStub();
     let resolveRuntime: ((runtime: Runtime) => void) | undefined;
     const createRuntimeFn = vi.fn().mockImplementation(
@@ -17,364 +15,457 @@ describe("createMcporterController", () => {
           resolveRuntime = resolve;
         }),
     );
-    process.env.HOME = homeDirectory;
+    const controller = createController(createRuntimeFn);
 
-    try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: createRuntimeFn as never,
-        packageVersion: "1.0.0",
-      });
+    const runtimePromise = controller.ensureRuntime("/repo");
+    await vi.waitFor(() => expect(createRuntimeFn).toHaveBeenCalledOnce());
+    await controller.shutdown();
+    resolveRuntime?.(runtime);
 
-      const runtimePromise = controller.ensureRuntime("/repo");
-      await vi.waitFor(() => {
-        expect(createRuntimeFn).toHaveBeenCalledTimes(1);
-      });
-      await controller.shutdown();
-
-      resolveRuntime?.(runtime);
-      await expect(runtimePromise).rejects.toThrow("Stale runtime session");
-      expect(runtime.close).toHaveBeenCalledTimes(1);
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
+    await expect(runtimePromise).rejects.toThrow("Stale runtime session");
+    expect(runtime.close).toHaveBeenCalledOnce();
   });
 
-  it("does not create a runtime in lazy mode", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const previousHome = process.env.HOME;
+  it("does not create a runtime for on-demand exposure", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "on-demand",
+    });
     const createRuntimeFn = vi.fn();
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      join(settingsDirectory, "mcporter.json"),
-      JSON.stringify({ mode: "lazy" }),
-      "utf8",
-    );
 
     try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: createRuntimeFn as never,
-        packageVersion: "1.0.0",
+      const controller = createController(createRuntimeFn, fixture.agentDir);
+      const prepared = await controller.prepareTurn({
+        prompt: "hello",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
       });
-
-      await expect(
-        controller.buildSystemPromptAppend("/repo"),
-      ).resolves.toBeUndefined();
+      expect(prepared.nativeTools).toEqual([]);
+      expect(prepared.systemPromptAppend).toBeUndefined();
       expect(createRuntimeFn).not.toHaveBeenCalled();
     } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
+      await fixture.cleanup();
     }
   });
 
-  it("loads call timeout settings even when no prompt orchestration ran", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const previousHome = process.env.HOME;
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      join(settingsDirectory, "mcporter.json"),
-      JSON.stringify({ timeoutMs: 45_000 }),
-      "utf8",
-    );
+  it("appends the default server index without listing tools", async () => {
+    const runtime = createRuntimeStub(undefined, ["alpha", "beta"]);
+    const controller = createController(vi.fn().mockResolvedValue(runtime));
 
-    try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: vi
-          .fn()
-          .mockResolvedValue(createRuntimeStub()) as never,
-        packageVersion: "1.0.0",
-      });
+    const prepared = await controller.prepareTurn({
+      prompt: "hello",
+      proxyActive: true,
+      rootDir: "/repo",
+    });
 
-      await expect(controller.resolveCallTimeout()).resolves.toBe(45_000);
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
+    expect(prepared.systemPromptAppend).toContain("`alpha`, `beta`");
+    expect(runtime.listTools).not.toHaveBeenCalled();
   });
 
-  it("falls back to the default call timeout when pi settings are malformed", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const previousHome = process.env.HOME;
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(join(settingsDirectory, "mcporter.json"), "{", "utf8");
+  it("re-reads call timeout configuration on every use", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      callTimeoutMs: 45_000,
+    });
 
     try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: vi
-          .fn()
-          .mockResolvedValue(createRuntimeStub()) as never,
-        packageVersion: "1.0.0",
-      });
-
-      await expect(controller.resolveCallTimeout()).resolves.toBe(30_000);
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
-    }
-  });
-
-  it("delegates MCPorter config resolution to mcporter", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const previousHome = process.env.HOME;
-    const previousConfig = process.env.MCPORTER_CONFIG;
-    const runtime = createRuntimeStub(undefined, ["demo"]);
-    const createRuntimeFn = vi.fn().mockResolvedValue(runtime);
-    process.env.HOME = homeDirectory;
-    process.env.MCPORTER_CONFIG = "/env/mcporter.json";
-
-    try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: createRuntimeFn as never,
-        packageVersion: "1.0.0",
-      });
-
-      await expect(controller.ensureRuntime("/repo")).resolves.toBe(runtime);
-      expect(createRuntimeFn).toHaveBeenCalledWith({
-        rootDir: "/repo",
-        clientInfo: { name: "pi-mcporter", version: "1.0.0" },
-      });
-      expect(createRuntimeFn.mock.calls[0]?.[0]).not.toHaveProperty(
-        "configPath",
+      const controller = createController(
+        vi.fn().mockResolvedValue(createRuntimeStub()),
+        fixture.agentDir,
       );
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-      if (previousConfig === undefined) {
-        delete process.env.MCPORTER_CONFIG;
-      } else {
-        process.env.MCPORTER_CONFIG = previousConfig;
-      }
+      await expect(
+        controller.resolveCallTimeout(undefined, fixture.rootDir),
+      ).resolves.toBe(45_000);
 
-      await rm(homeDirectory, { recursive: true, force: true });
+      await fixture.writeGlobal({ version: 1, callTimeoutMs: 60_000 });
+      await expect(
+        controller.resolveCallTimeout(undefined, fixture.rootDir),
+      ).resolves.toBe(60_000);
+    } finally {
+      await fixture.cleanup();
     }
   });
 
-  it("recreates the runtime when the pi cwd changes", async () => {
-    const firstRuntime = createRuntimeStub();
-    const secondRuntime = createRuntimeStub();
-    const createRuntimeFn = vi
-      .fn()
-      .mockResolvedValueOnce(firstRuntime)
-      .mockResolvedValueOnce(secondRuntime);
-    const controller = createMcporterController({} as never, {
-      createRuntimeFn: createRuntimeFn as never,
-      packageVersion: "1.0.0",
-    });
+  it("disables enrichment for invalid config and deduplicates its warning", async () => {
+    const fixture = await createSettingsFixtureRaw("{");
+    const createRuntimeFn = vi.fn();
 
-    await expect(controller.ensureRuntime("/repo-a")).resolves.toBe(
-      firstRuntime,
-    );
-    await expect(controller.ensureRuntime("/repo-b")).resolves.toBe(
-      secondRuntime,
-    );
+    try {
+      const controller = createController(createRuntimeFn, fixture.agentDir);
+      const first = await controller.prepareTurn({
+        prompt: "hello",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      const second = await controller.prepareTurn({
+        prompt: "hello again",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
 
-    expect(firstRuntime.close).toHaveBeenCalledTimes(1);
-    expect(createRuntimeFn).toHaveBeenNthCalledWith(1, {
-      rootDir: "/repo-a",
-      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
-    });
-    expect(createRuntimeFn).toHaveBeenNthCalledWith(2, {
-      rootDir: "/repo-b",
-      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
-    });
+      expect(first.warnings).toEqual([
+        expect.stringContaining("exposure enrichment is disabled"),
+      ]);
+      expect(second.warnings).toEqual([]);
+      expect(first.nativeTools).toEqual([]);
+      expect(first.systemPromptAppend).toBeUndefined();
+      expect(createRuntimeFn).not.toHaveBeenCalled();
+      await expect(
+        controller.resolveCallTimeout(undefined, fixture.rootDir),
+      ).resolves.toBe(30_000);
+    } finally {
+      await fixture.cleanup();
+    }
   });
 
-  it("clears the catalog when the pi cwd changes", async () => {
-    const firstRuntime = createRuntimeStub(
-      async () => [demoTool("alpha", "repo_a_lookup")],
+  it("builds prompt-matched signatures in a hidden-message payload", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "match",
+      maxMatchedTools: 1,
+    });
+    const runtime = createRuntimeStub(
+      async () => [
+        demoTool("list_issues", "List Linear issues"),
+        demoTool("create_issue", "Create a Linear issue"),
+      ],
+      ["linear"],
+    );
+
+    try {
+      const controller = createController(
+        vi.fn().mockResolvedValue(runtime),
+        fixture.agentDir,
+      );
+      const prepared = await controller.prepareTurn({
+        prompt: "Please list my Linear issues",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+
+      expect(prepared.systemPromptAppend).toContain("`linear`");
+      expect(prepared.matchedSelectors).toEqual(["linear.list_issues"]);
+      expect(prepared.matchMessage).toContain("BEGIN UNTRUSTED MCP METADATA");
+      expect(prepared.matchMessage).toContain("Input parameters");
+      expect(runtime.listTools).toHaveBeenCalledWith(
+        "linear",
+        expect.objectContaining({
+          includeSchema: true,
+          autoAuthorize: false,
+        }),
+      );
+
+      const imageOnly = await controller.prepareTurn({
+        prompt: "",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      expect(imageOnly.matchMessage).toBeUndefined();
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("skips a hidden match message whose content is already in context", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "match",
+      maxMatchedTools: 1,
+    });
+    const runtime = createRuntimeStub(
+      async () => [
+        demoTool("list_issues", "List Linear issues"),
+        demoTool("create_issue", "Create a Linear issue"),
+      ],
+      ["linear"],
+    );
+
+    try {
+      const controller = createController(
+        vi.fn().mockResolvedValue(runtime),
+        fixture.agentDir,
+      );
+      const first = await controller.prepareTurn({
+        prompt: "Please list my Linear issues",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      const repeated = await controller.prepareTurn({
+        prompt: "Please list my Linear issues",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      controller.resetMatchEmissions(fixture.rootDir);
+      const afterContextReset = await controller.prepareTurn({
+        prompt: "Please list my Linear issues",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      const different = await controller.prepareTurn({
+        prompt: "Create a new Linear issue",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+
+      expect(first.matchMessage).toContain("linear.list_issues");
+      expect(repeated.matchMessage).toBeUndefined();
+      expect(repeated.matchedSelectors).toEqual(first.matchedSelectors);
+      expect(afterContextReset.matchMessage).toContain("linear.list_issues");
+      expect(different.matchMessage).toContain("linear.create_issue");
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("starts match discovery in the background at session start", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "match",
+    });
+    let resolveTools: ((tools: ServerToolInfo[]) => void) | undefined;
+    const runtime = createRuntimeStub(
+      () =>
+        new Promise<ServerToolInfo[]>((resolve) => {
+          resolveTools = resolve;
+        }),
+      ["demo"],
+    );
+
+    try {
+      const controller = createController(
+        vi.fn().mockResolvedValue(runtime),
+        fixture.agentDir,
+      );
+      await expect(
+        controller.startSession(fixture.rootDir, true),
+      ).resolves.toEqual([]);
+      expect(runtime.listTools).toHaveBeenCalledOnce();
+
+      resolveTools?.([demoTool("lookup", "Look up data")]);
+      await vi.waitFor(() => {
+        expect(
+          controller.catalogStore.getCachedToolsForServer("demo", {
+            requireSchema: true,
+          }),
+        ).toHaveLength(1);
+      });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("applies match filters without changing the proxy index", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "on-demand",
+      servers: {
+        demo: {
+          exposure: "match",
+          includeTools: ["get_*"],
+          excludeTools: ["*_secret"],
+        },
+      },
+    });
+    const runtime = createRuntimeStub(
+      async () => [
+        demoTool("get_public", "Get public data"),
+        demoTool("get_secret", "Get secret data"),
+        demoTool("create_data", "Create data"),
+      ],
+      ["demo"],
+    );
+
+    try {
+      const controller = createController(
+        vi.fn().mockResolvedValue(runtime),
+        fixture.agentDir,
+      );
+      const prepared = await controller.prepareTurn({
+        prompt: "get public secret create data",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+
+      expect(prepared.systemPromptAppend).toContain("`demo`");
+      expect(prepared.matchedSelectors).toEqual(["demo.get_public"]);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("recreates the runtime and clears catalogs when cwd changes", async () => {
+    const first = createRuntimeStub(
+      async () => [demoTool("repo_a_lookup")],
       ["alpha"],
     );
-    const secondRuntime = createRuntimeStub(
-      async () => [demoTool("alpha", "repo_b_lookup")],
+    const second = createRuntimeStub(
+      async () => [demoTool("repo_b_lookup")],
       ["alpha"],
     );
     const createRuntimeFn = vi
       .fn()
-      .mockResolvedValueOnce(firstRuntime)
-      .mockResolvedValueOnce(secondRuntime);
-    const controller = createMcporterController({} as never, {
-      createRuntimeFn: createRuntimeFn as never,
-      packageVersion: "1.0.0",
-    });
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second);
+    const controller = createController(createRuntimeFn);
 
     await controller.ensureRuntime("/repo-a");
-    await controller.catalogStore.getBasicCatalog(firstRuntime);
-    expect(controller.catalogStore.getCachedToolsForServer("alpha")).toEqual([
-      expect.objectContaining({ selector: "alpha.repo_a_lookup" }),
-    ]);
-
+    await controller.catalogStore.getBasicCatalog(first);
     await controller.ensureRuntime("/repo-b");
+
+    expect(first.close).toHaveBeenCalledOnce();
     expect(
       controller.catalogStore.getCachedToolsForServer("alpha"),
     ).toBeUndefined();
-    await expect(
-      controller.catalogStore.getBasicCatalog(secondRuntime),
-    ).resolves.toMatchObject({
-      tools: [expect.objectContaining({ selector: "alpha.repo_b_lookup" })],
-    });
   });
 
-  it("serializes concurrent runtime changes for different roots", async () => {
-    let finishClosingFirst: (() => void) | undefined;
-    const firstRuntime = createRuntimeStub();
-    firstRuntime.close.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishClosingFirst = resolve;
-        }),
-    );
-    const secondRuntime = createRuntimeStub();
-    const thirdRuntime = createRuntimeStub();
-    const createRuntimeFn = vi
-      .fn()
-      .mockResolvedValueOnce(firstRuntime)
-      .mockResolvedValueOnce(secondRuntime)
-      .mockResolvedValueOnce(thirdRuntime);
-    const controller = createMcporterController({} as never, {
-      createRuntimeFn: createRuntimeFn as never,
-      packageVersion: "1.0.0",
+  it("updates status after background discovery completes", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "match",
+      discoveryTimeoutMs: 100,
     });
-
-    await controller.ensureRuntime("/repo-a");
-    const secondRequest = controller.ensureRuntime("/repo-b");
-    await vi.waitFor(() => {
-      expect(firstRuntime.close).toHaveBeenCalledTimes(1);
-    });
-    const thirdRequest = controller.ensureRuntime("/repo-c");
-
-    expect(createRuntimeFn).toHaveBeenCalledTimes(1);
-    finishClosingFirst?.();
-    await expect(secondRequest).resolves.toBe(secondRuntime);
-    await expect(thirdRequest).resolves.toBe(thirdRuntime);
-    expect(createRuntimeFn).toHaveBeenNthCalledWith(2, {
-      rootDir: "/repo-b",
-      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
-    });
-    expect(createRuntimeFn).toHaveBeenNthCalledWith(3, {
-      rootDir: "/repo-c",
-      clientInfo: { name: "pi-mcporter", version: "1.0.0" },
-    });
-  });
-
-  it("uses serverModes only for prompt orchestration", async () => {
-    const homeDirectory = await mkdtemp(join(tmpdir(), "pi-mcporter-home-"));
-    const settingsDirectory = join(homeDirectory, ".pi", "agent");
-    const previousHome = process.env.HOME;
+    let resolveTools: ((tools: ServerToolInfo[]) => void) | undefined;
     const runtime = createRuntimeStub(
-      async (server) => [demoTool(server, "lookup")],
-      ["alpha", "beta"],
-    );
-    process.env.HOME = homeDirectory;
-    await mkdir(settingsDirectory, { recursive: true });
-    await writeFile(
-      join(settingsDirectory, "mcporter.json"),
-      JSON.stringify({
-        mode: "index",
-        serverModes: { alpha: "lazy", beta: "preload" },
-      }),
-      "utf8",
+      () =>
+        new Promise<ServerToolInfo[]>((resolve) => {
+          resolveTools = resolve;
+        }),
+      ["demo"],
     );
 
     try {
-      const controller = createMcporterController({} as never, {
-        createRuntimeFn: vi.fn().mockResolvedValue(runtime) as never,
-        packageVersion: "1.0.0",
+      const controller = createController(
+        vi.fn().mockResolvedValue(runtime),
+        fixture.agentDir,
+      );
+      await controller.prepareTurn({
+        prompt: "look up data",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      const nativeStatus = {
+        active: [],
+        diagnostics: [],
+        registered: [],
+      };
+      const pending = await controller.formatStatus(
+        fixture.rootDir,
+        true,
+        nativeStatus,
+      );
+      expect(pending).toContain("Discovery still running: demo");
+
+      resolveTools?.([demoTool("lookup")]);
+      await vi.waitFor(() => {
+        expect(
+          controller.catalogStore.getCachedToolsForServer("demo", {
+            requireSchema: true,
+          }),
+        ).toHaveLength(1);
       });
 
-      const first = await controller.buildSystemPromptAppend("/repo");
-      expect(first).toContain("beta");
-      expect(first).not.toContain("alpha");
-      await delay(0);
-      const second = await controller.buildSystemPromptAppend("/repo");
-      expect(second).toContain("beta.lookup");
-      expect(second).not.toContain("alpha.lookup");
+      const completed = await controller.formatStatus(
+        fixture.rootDir,
+        true,
+        nativeStatus,
+      );
+      expect(completed).toContain("schema cache fresh");
+      expect(completed).not.toContain("Discovery still running");
     } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-
-      await rm(homeDirectory, { recursive: true, force: true });
+      await fixture.cleanup();
     }
+  });
+
+  it("formats status without starting a cold runtime", async () => {
+    const createRuntimeFn = vi.fn();
+    const controller = createController(createRuntimeFn);
+
+    const status = await controller.formatStatus("/repo", true, {
+      active: [],
+      diagnostics: [],
+      registered: [],
+    });
+
+    expect(status).toContain("Default exposure: index");
+    expect(status).toContain("status does not start the runtime");
+    expect(createRuntimeFn).not.toHaveBeenCalled();
   });
 });
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function createController(
+  createRuntimeFn: ReturnType<typeof vi.fn>,
+  agentDirectory?: string,
+) {
+  return createMcporterController({} as never, {
+    agentDirectory: agentDirectory ?? "/__pi-mcporter-test-agent__",
+    createRuntimeFn: createRuntimeFn as never,
+    packageVersion: "1.0.0",
   });
 }
 
-function demoTool(server: string, name: string): ServerToolInfo {
+function demoTool(name: string, description = name): ServerToolInfo {
   return {
     name,
-    description: `${server}.${name}`,
+    description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query" },
+      },
+      required: ["query"],
+    },
   };
 }
 
 function createRuntimeStub(
-  listTools: Runtime["listTools"] = async () => [],
+  listTools: Runtime["listTools"] = vi.fn().mockResolvedValue([]),
   servers: string[] = [],
-): Runtime & { close: ReturnType<typeof vi.fn> } {
-  const definitions = new Map(
-    servers.map((name) => [
-      name,
-      {
-        name,
-        command: { kind: "http", url: new URL("https://example.com") },
-      },
-    ]),
-  );
-
+): Runtime & {
+  close: ReturnType<typeof vi.fn>;
+  listTools: ReturnType<typeof vi.fn>;
+} {
+  const listToolsMock = vi.fn(listTools);
   return {
-    listServers: () => [...definitions.keys()],
-    listTools,
-    getDefinitions: () => [...definitions.values()],
-    getDefinition: (server: string) => {
-      const definition = definitions.get(server);
-      if (!definition) {
-        throw new Error("not implemented");
-      }
-      return definition;
+    listServers: () => servers,
+    listTools: listToolsMock,
+    getDefinitions: () => [],
+    getDefinition: () => {
+      throw new Error("not implemented");
     },
-    registerDefinition: (definition: { name: string }) => {
-      definitions.set(definition.name, definition);
-    },
+    registerDefinition: () => {},
     callTool: async () => ({}),
     listResources: async () => ({}),
     connect: async () => {
       throw new Error("not implemented");
     },
     close: vi.fn().mockResolvedValue(undefined),
-  } as unknown as Runtime & { close: ReturnType<typeof vi.fn> };
+  } as unknown as Runtime & {
+    close: ReturnType<typeof vi.fn>;
+    listTools: ReturnType<typeof vi.fn>;
+  };
+}
+
+async function createSettingsFixture(settings: unknown) {
+  return await createSettingsFixtureRaw(JSON.stringify(settings));
+}
+
+async function createSettingsFixtureRaw(raw: string) {
+  const directory = await mkdtemp(join(tmpdir(), "pi-mcporter-settings-"));
+  const agentDir = join(directory, "agent");
+  const rootDir = join(directory, "repo");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(rootDir, { recursive: true });
+  const globalPath = join(agentDir, "mcporter.json");
+  await writeFile(globalPath, raw, "utf8");
+
+  return {
+    agentDir,
+    rootDir,
+    async writeGlobal(settings: unknown) {
+      await writeFile(globalPath, JSON.stringify(settings), "utf8");
+    },
+    async cleanup() {
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
 }

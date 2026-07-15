@@ -3,9 +3,16 @@ import {
   SCHEMA_SNIPPET_MAX_BYTES,
   SCHEMA_SNIPPET_MAX_LINES,
 } from "./constants.js";
-import { cleanSingleLine, isRecord, safeStringify } from "./helpers.js";
+import { isRecord, safeStringify } from "./helpers.js";
+import { sanitizeMetadataText, sanitizePromptCode } from "./metadata.js";
 
-export function summarizeInputSchema(schema: unknown): string[] {
+export function summarizeInputSchema(
+  schema: unknown,
+  options: {
+    maxDescriptionLength?: number;
+    maxProperties?: number;
+  } = {},
+): string[] {
   const lines: string[] = [];
   if (!isRecord(schema)) {
     lines.push("Input: schema unavailable.");
@@ -31,12 +38,16 @@ export function summarizeInputSchema(schema: unknown): string[] {
     `Input parameters (${required.size} required, ${propertyNames.length - required.size} optional):`,
   );
 
-  const preview = propertyNames.slice(0, 20);
+  const maxProperties = options.maxProperties ?? 20;
+  const preview = propertyNames.slice(0, maxProperties);
   for (const name of preview) {
     const propertySchema = properties[name];
     const type = schemaTypeSummary(propertySchema);
-    const desc = propertyDescription(propertySchema);
-    let line = `- \`${formatMarkdownCodeSpan(name)}\`${required.has(name) ? " (required)" : ""}: \`${formatMarkdownCodeSpan(type)}\``;
+    const desc = propertyDescription(
+      propertySchema,
+      options.maxDescriptionLength,
+    );
+    let line = `- \`${sanitizePromptCode(name, 100)}\`${required.has(name) ? " (required)" : ""}: \`${sanitizePromptCode(type, 160)}\``;
     if (desc) {
       line += ` — ${desc}`;
     }
@@ -60,9 +71,9 @@ export function summarizeOutputSchema(schema: unknown): string[] {
   const type = schemaTypeSummary(schema);
   const description = propertyDescription(schema);
   if (description) {
-    return [`Output: \`${formatMarkdownCodeSpan(type)}\` — ${description}`];
+    return [`Output: \`${sanitizePromptCode(type, 160)}\` — ${description}`];
   }
-  return [`Output: \`${formatMarkdownCodeSpan(type)}\``];
+  return [`Output: \`${sanitizePromptCode(type, 160)}\``];
 }
 
 export function renderSchemaSnippet(schema: unknown): string {
@@ -83,7 +94,8 @@ export function renderSchemaSnippet(schema: unknown): string {
   ].join("\n");
 }
 
-function schemaTypeSummary(schema: unknown): string {
+function schemaTypeSummary(schema: unknown, depth = 0): string {
+  if (depth > 8) return "complex";
   if (!isRecord(schema)) {
     return "unknown";
   }
@@ -100,7 +112,7 @@ function schemaTypeSummary(schema: unknown): string {
   const primitive = schema.type;
   if (typeof primitive === "string") {
     if (primitive === "array") {
-      const itemType = schemaTypeSummary(schema.items);
+      const itemType = schemaTypeSummary(schema.items, depth + 1);
       return `${itemType}[]`;
     }
 
@@ -126,7 +138,7 @@ function schemaTypeSummary(schema: unknown): string {
   if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
     const variants = schema.anyOf
       .slice(0, 4)
-      .map((item) => schemaTypeSummary(item));
+      .map((item) => schemaTypeSummary(item, depth + 1));
     return schema.anyOf.length > 4
       ? `${variants.join(" | ")} | …`
       : variants.join(" | ");
@@ -135,7 +147,7 @@ function schemaTypeSummary(schema: unknown): string {
   if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
     const variants = schema.oneOf
       .slice(0, 4)
-      .map((item) => schemaTypeSummary(item));
+      .map((item) => schemaTypeSummary(item, depth + 1));
     return schema.oneOf.length > 4
       ? `${variants.join(" | ")} | …`
       : variants.join(" | ");
@@ -144,14 +156,10 @@ function schemaTypeSummary(schema: unknown): string {
   return "unknown";
 }
 
-function propertyDescription(schema: unknown): string {
+function propertyDescription(schema: unknown, maxLength = 240): string {
   if (!isRecord(schema) || typeof schema.description !== "string") {
     return "";
   }
 
-  return cleanSingleLine(schema.description);
-}
-
-function formatMarkdownCodeSpan(value: string): string {
-  return value.replaceAll("`", "\\`");
+  return sanitizeMetadataText(schema.description, maxLength);
 }

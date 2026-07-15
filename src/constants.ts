@@ -1,5 +1,11 @@
 export const CATALOG_TTL_MS = 5 * 60 * 1000;
-export const DEFAULT_CATALOG_LIST_TIMEOUT_MS = 10_000;
+export const CATALOG_FAILURE_RETRY_MS = 30 * 1000;
+export const DEFAULT_DISCOVERY_TIMEOUT_MS = 2_000;
+export const MIN_DISCOVERY_TIMEOUT_MS = 100;
+export const MAX_DISCOVERY_TIMEOUT_MS = 30_000;
+
+export const DEFAULT_MAX_MATCHED_TOOLS = 8;
+export const MAX_MATCHED_TOOLS = 50;
 
 export const DEFAULT_SEARCH_LIMIT = 20;
 export const MAX_SEARCH_LIMIT = 100;

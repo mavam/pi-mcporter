@@ -30,11 +30,14 @@ After this change, move the server configuration to MCPorter and keep only pi-sp
 
 ```json
 {
-  "mode": "index",
-  "serverModes": {
-    "excalidraw": "preload"
+  "version": 1,
+  "defaultExposure": "index",
+  "servers": {
+    "excalidraw": {
+      "exposure": "match"
+    }
   }
 }
 ```
 
-This is a hard cut that removes pi-mcporter's `!command` secret execution and inline server support. The clearer layering avoids competing configuration systems: MCPorter owns MCP connectivity and credentials, while pi-mcporter only decides how much MCP catalog metadata to expose to the agent.
+This is a hard cut that removes pi-mcporter's `!command` secret execution and inline server support. The clearer layering avoids competing configuration systems: MCPorter owns MCP connectivity and credentials, while pi-mcporter controls how MCP servers and tools are exposed to the model.

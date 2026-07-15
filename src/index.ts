@@ -19,14 +19,23 @@ import { handleDescribeAction } from "./actions/describe.js";
 import { handleSearchAction } from "./actions/search.js";
 import { createMcporterController } from "./bootstrap.js";
 import { formatCallArgsPreview } from "./call-args-preview.js";
-import { cleanSingleLine, textContent } from "./helpers.js";
+import {
+  isMcporterExposure,
+  matchesToolPattern,
+  resolveServerExposure,
+} from "./exposure.js";
+import {
+  cleanSingleLine,
+  isProjectContextTrusted,
+  textContent,
+} from "./helpers.js";
 import {
   clampLimit,
   parseCallArgs,
   parseSelector,
   resolveCallTimeoutFromInputs,
 } from "./inputs.js";
-import { resolveMcporterMode, resolveServerMode } from "./mode.js";
+import { NativeToolManager, nativeToolName } from "./native-tools.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
 import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
 import type { ToolDetails } from "./types.js";
@@ -42,6 +51,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
   const controller = createMcporterController(pi, {
     packageVersion: PACKAGE_VERSION,
   });
+  const nativeTools = new NativeToolManager(pi, controller.executeNative);
 
   pi.registerTool({
     name: "mcporter",
@@ -94,7 +104,12 @@ export default function mcporterExtension(pi: ExtensionAPI) {
             params,
             signal,
             controller.catalogStore,
-            controller.resolveCallTimeout,
+            (override) =>
+              controller.resolveCallTimeout(
+                override,
+                ctx.cwd,
+                isProjectContextTrusted(ctx),
+              ),
           );
         }
         default:
@@ -133,24 +148,101 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on("before_agent_start", async (event, ctx) => {
-    if (!isToolActive(pi, "mcporter")) {
-      return;
-    }
+  pi.registerCommand("mcporter", {
+    description: "Show pi-mcporter exposure and catalog status",
+    async handler(args, ctx) {
+      const action = args.trim();
+      if (action && action !== "status") {
+        ctx.ui.notify("Usage: /mcporter status", "warning");
+        return;
+      }
+      const status = await controller.formatStatus(
+        ctx.cwd,
+        isToolActive(pi, "mcporter"),
+        nativeTools.getStatus(),
+        isProjectContextTrusted(ctx),
+      );
+      ctx.ui.notify(status, "info");
+    },
+  });
 
-    const systemPromptAppend = await controller.buildSystemPromptAppend(
-      ctx.cwd,
-    );
-    if (systemPromptAppend) {
-      return {
-        systemPrompt: `${event.systemPrompt}\n\n${systemPromptAppend}`,
-      };
-    }
+  pi.on("session_start", (_event, ctx) => {
+    controller.resetMatchEmissions(ctx.cwd);
+    void controller
+      .startSession(
+        ctx.cwd,
+        isToolActive(pi, "mcporter"),
+        isProjectContextTrusted(ctx),
+      )
+      .then((warnings) => notifyWarnings(ctx, warnings))
+      .catch((error) =>
+        notifyWarnings(ctx, [
+          `MCPorter session initialization failed: ${String(error)}`,
+        ]),
+      );
+  });
+
+  pi.on("session_compact", (_event, ctx) => {
+    controller.resetMatchEmissions(ctx.cwd);
+  });
+
+  pi.on("session_tree", (_event, ctx) => {
+    controller.resetMatchEmissions(ctx.cwd);
+  });
+
+  pi.on("before_agent_start", async (event, ctx) => {
+    const prepared = await controller.prepareTurn({
+      projectTrusted: isProjectContextTrusted(ctx),
+      prompt: event.prompt,
+      proxyActive: isToolActive(pi, "mcporter"),
+      rootDir: ctx.cwd,
+    });
+    const nativeWarnings = nativeTools.reconcile(prepared.nativeTools);
+    notifyWarnings(ctx, [...prepared.warnings, ...nativeWarnings]);
+
+    const result = {
+      ...(prepared.systemPromptAppend
+        ? {
+            systemPrompt: `${event.systemPrompt}\n\n${prepared.systemPromptAppend}`,
+          }
+        : {}),
+      ...(prepared.matchMessage
+        ? {
+            message: {
+              customType: "mcporter-match",
+              content: prepared.matchMessage,
+              display: false,
+              details: {
+                configFingerprint: prepared.configFingerprint,
+                selectors: prepared.matchedSelectors,
+              },
+            },
+          }
+        : {}),
+    };
+    return Object.keys(result).length > 0 ? result : undefined;
   });
 
   pi.on("session_shutdown", async () => {
     await controller.shutdown();
   });
+}
+
+function notifyWarnings(
+  ctx: {
+    ui: {
+      notify(message: string, type?: "info" | "warning" | "error"): void;
+    };
+  },
+  warnings: string[],
+): void {
+  for (const warning of warnings) {
+    try {
+      ctx.ui?.notify?.(warning, "warning");
+    } catch {
+      // Notifications are best-effort in print/RPC and lightweight test hosts.
+    }
+  }
 }
 
 function isToolActive(
@@ -318,8 +410,10 @@ export const __test__ = {
   parseSelector,
   rankTools,
   resolveCallTimeoutFromInputs,
-  resolveMcporterMode,
-  resolveServerMode,
+  isMcporterExposure,
+  matchesToolPattern,
+  nativeToolName,
+  resolveServerExposure,
   scoreTool,
   suggest,
 };
