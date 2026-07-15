@@ -8,6 +8,31 @@ const SCHEMA_METADATA_KEYS = new Set([
   "examples",
   "title",
 ]);
+const SCHEMA_MAP_KEYS = new Set([
+  "$defs",
+  "definitions",
+  "dependencies",
+  "dependentSchemas",
+  "patternProperties",
+  "properties",
+]);
+const SCHEMA_VALUE_KEYS = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "items",
+  "not",
+  "prefixItems",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+]);
+
+type SchemaValueContext = "metadata" | "schema" | "schema-map" | "value";
 
 export function sanitizeMetadataText(text: string, maxLength: number): string {
   const cleaned = text
@@ -37,15 +62,12 @@ export function sanitizeToolSchema(schema: unknown): unknown {
 
   const visit = (
     value: unknown,
-    key?: string,
-    insideMetadata = false,
+    context: SchemaValueContext,
     depth = 0,
   ): unknown => {
     if (depth > 64) throw new Error("schema nesting exceeds 64 levels");
-    const isMetadata =
-      insideMetadata || Boolean(key && SCHEMA_METADATA_KEYS.has(key));
     if (typeof value === "string") {
-      return isMetadata ? sanitizeMetadataText(value, 500) : value;
+      return context === "metadata" ? sanitizeMetadataText(value, 500) : value;
     }
     if (
       value === null ||
@@ -57,8 +79,14 @@ export function sanitizeToolSchema(schema: unknown): unknown {
     if (Array.isArray(value)) {
       if (seen.has(value)) throw new Error("schema contains a cycle");
       seen.add(value);
+      const childContext =
+        context === "metadata"
+          ? "metadata"
+          : context === "schema"
+            ? "schema"
+            : "value";
       const result = value.map((entry) =>
-        visit(entry, undefined, isMetadata, depth + 1),
+        visit(entry, childContext, depth + 1),
       );
       seen.delete(value);
       return result;
@@ -70,10 +98,11 @@ export function sanitizeToolSchema(schema: unknown): unknown {
     seen.add(value);
     const result: Record<string, unknown> = {};
     for (const [childKey, childValue] of Object.entries(value)) {
+      const childContext = contextForChild(context, childKey);
       Object.defineProperty(result, childKey, {
         configurable: true,
         enumerable: true,
-        value: visit(childValue, childKey, isMetadata, depth + 1),
+        value: visit(childValue, childContext, depth + 1),
         writable: true,
       });
     }
@@ -81,5 +110,25 @@ export function sanitizeToolSchema(schema: unknown): unknown {
     return result;
   };
 
-  return visit(schema);
+  return visit(schema, "schema");
+}
+
+function contextForChild(
+  context: SchemaValueContext,
+  key: string,
+): SchemaValueContext {
+  if (context === "metadata") return "metadata";
+  if (context === "schema-map") return "schema";
+  if (context !== "schema") return "value";
+  if (SCHEMA_METADATA_KEYS.has(key)) return "metadata";
+  if (SCHEMA_MAP_KEYS.has(key)) return "schema-map";
+  if (
+    SCHEMA_VALUE_KEYS.has(key) ||
+    key === "allOf" ||
+    key === "anyOf" ||
+    key === "oneOf"
+  ) {
+    return "schema";
+  }
+  return "value";
 }
