@@ -10,7 +10,12 @@ import {
   resolveServerExposure,
   type ServerExposurePolicy,
 } from "./exposure.js";
-import { normalizeRootDir, textContent, toErrorMessage } from "./helpers.js";
+import {
+  isProjectContextTrusted,
+  normalizeRootDir,
+  textContent,
+  toErrorMessage,
+} from "./helpers.js";
 import { resolveCallTimeoutFromInputs } from "./inputs.js";
 import type { NativeToolStatus } from "./native-tools.js";
 import { PromptCatalogProvider } from "./prompt-catalog-provider.js";
@@ -81,11 +86,15 @@ export function createMcporterController(
     catalogService,
   );
 
-  async function loadConfig(rootDir?: string): Promise<ConfigLoadState> {
+  async function loadConfig(
+    rootDir?: string,
+    projectTrusted = false,
+  ): Promise<ConfigLoadState> {
     const normalizedRoot = normalizeRootDir(rootDir);
     const previousFingerprint = configFingerprints.get(normalizedRoot);
     try {
       const config = await loadConfigFn({
+        projectTrusted,
         rootDir: normalizedRoot,
         ...(options.agentDirectory
           ? { agentDirectory: options.agentDirectory }
@@ -120,8 +129,9 @@ export function createMcporterController(
   async function startSession(
     rootDir: string | undefined,
     proxyActive: boolean,
+    projectTrusted = false,
   ): Promise<string[]> {
-    const loaded = await loadConfig(rootDir);
+    const loaded = await loadConfig(rootDir, projectTrusted);
     // A new pi session starts a new conversation, so earlier hidden match
     // messages are no longer in context.
     lastMatchEmissions.clear();
@@ -144,11 +154,12 @@ export function createMcporterController(
   }
 
   async function prepareTurn(input: {
+    projectTrusted?: boolean;
     prompt: string;
     proxyActive: boolean;
     rootDir?: string;
   }): Promise<PreparedMcporterTurn> {
-    const loaded = await loadConfig(input.rootDir);
+    const loaded = await loadConfig(input.rootDir, input.projectTrusted);
     if (!loaded.config) {
       return {
         matchedSelectors: [],
@@ -212,8 +223,9 @@ export function createMcporterController(
   async function resolveCallTimeout(
     override?: number,
     rootDir?: string,
+    projectTrusted = false,
   ): Promise<number> {
-    const loaded = await loadConfig(rootDir);
+    const loaded = await loadConfig(rootDir, projectTrusted);
     const configured =
       loaded.config?.callTimeoutMs ??
       getDefaultMcporterSettings().callTimeoutMs;
@@ -239,7 +251,8 @@ export function createMcporterController(
       { action: "call", selector, args },
       signal,
       catalogService.store,
-      (override) => resolveCallTimeout(override, ctx.cwd),
+      (override) =>
+        resolveCallTimeout(override, ctx.cwd, isProjectContextTrusted(ctx)),
     );
   }
 
@@ -247,8 +260,9 @@ export function createMcporterController(
     rootDir: string | undefined,
     proxyActive: boolean,
     nativeStatus: NativeToolStatus,
+    projectTrusted = false,
   ): Promise<string> {
-    const loaded = await loadConfig(rootDir);
+    const loaded = await loadConfig(rootDir, projectTrusted);
     const lines = [
       "MCPorter status",
       `Root: ${loaded.rootDir}`,
@@ -279,6 +293,11 @@ export function createMcporterController(
       `Discovery budget: ${config.discoveryTimeoutMs}ms overall`,
       `Maximum matched tools: ${config.maxMatchedTools}`,
     );
+    if (!config.projectTrusted) {
+      lines.push(
+        `Project config: ignored until the project is trusted (${config.projectPath})`,
+      );
+    }
 
     const runtime = runtimeSession.peekRuntime(loaded.rootDir);
     const runtimeServers = runtime?.listServers() ?? [];

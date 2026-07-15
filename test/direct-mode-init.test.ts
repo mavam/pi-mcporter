@@ -64,6 +64,30 @@ describe("extension exposure lifecycle", () => {
     }
   });
 
+  it("ignores project exposure settings for untrusted projects", async () => {
+    const fixture = await createFixture({
+      version: 1,
+      defaultExposure: "on-demand",
+    });
+    await fixture.writeProject({
+      version: 1,
+      servers: {
+        demo: { exposure: "native", includeTools: ["*"] },
+      },
+    });
+
+    try {
+      const harness = createExtensionHarness(fixture.rootDir, false);
+      mcporterExtension(harness.api);
+
+      await expect(harness.beforeAgentStart("hello")).resolves.toBeUndefined();
+      expect(harness.tools.has("mcp__demo__echo")).toBe(false);
+      expect(createRuntime).not.toHaveBeenCalled();
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("injects match results as a hidden custom message, not system churn", async () => {
     const fixture = await createFixture({
       version: 1,
@@ -260,7 +284,7 @@ describe("extension exposure lifecycle", () => {
   });
 });
 
-function createExtensionHarness(cwd = "/repo") {
+function createExtensionHarness(cwd = "/repo", projectTrusted = true) {
   type Handler = (event: any, ctx: any) => any;
   const handlers = new Map<string, Handler[]>();
   const tools = new Map<string, any>();
@@ -309,6 +333,7 @@ function createExtensionHarness(cwd = "/repo") {
   const context = {
     cwd,
     hasUI: true,
+    isProjectTrusted: () => projectTrusted,
     ui: {
       notify(message: string, type?: string) {
         notifications.push([message, type]);
@@ -406,6 +431,15 @@ async function createFixtureRaw(raw?: string) {
     rootDir,
     async writeGlobal(settings: unknown) {
       await writeFile(globalPath, JSON.stringify(settings), "utf8");
+    },
+    async writeProject(settings: unknown) {
+      const projectDirectory = join(rootDir, ".pi");
+      await mkdir(projectDirectory, { recursive: true });
+      await writeFile(
+        join(projectDirectory, "mcporter.json"),
+        JSON.stringify(settings),
+        "utf8",
+      );
     },
     async cleanup() {
       if (previousAgentDir === undefined) {

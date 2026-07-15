@@ -33,6 +33,7 @@ export interface ResolvedMcporterConfig extends McporterSettings {
   fingerprint: string;
   globalPath: string;
   projectPath: string;
+  projectTrusted: boolean;
   loadedPaths: string[];
 }
 
@@ -47,6 +48,7 @@ interface McporterSettingsLayer {
 
 export interface SettingsLoaderOptions {
   agentDirectory?: string;
+  projectTrusted?: boolean;
   readFileFn?: (path: string, encoding: "utf8") => Promise<string>;
   rootDir?: string;
 }
@@ -104,8 +106,11 @@ export async function loadResolvedMcporterConfig(
     options.agentDirectory,
   );
 
+  const projectTrusted = options.projectTrusted === true;
   const globalSource = await readOptionalSettingsFile(globalPath, readFileFn);
-  const projectSource = await readOptionalSettingsFile(projectPath, readFileFn);
+  const projectSource = projectTrusted
+    ? await readOptionalSettingsFile(projectPath, readFileFn)
+    : undefined;
   const hasGlobalSource = globalSource !== undefined;
   const hasProjectSource = projectSource !== undefined;
   const globalLayer = hasGlobalSource
@@ -125,6 +130,7 @@ export async function loadResolvedMcporterConfig(
     fingerprint: fingerprintSettings(settings),
     globalPath,
     projectPath,
+    projectTrusted,
     loadedPaths,
   };
 }

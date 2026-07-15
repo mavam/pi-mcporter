@@ -47,6 +47,19 @@ export function normalizeRootDir(rootDir?: string): string {
   return rootDir?.trim() || process.cwd();
 }
 
+export function isProjectContextTrusted(ctx: unknown): boolean {
+  if (!isRecord(ctx)) return false;
+  const check = ctx.isProjectTrusted;
+  // Older Pi releases do not expose project trust to extensions and load
+  // project resources unconditionally, so preserve their existing behavior.
+  if (typeof check !== "function") return true;
+  try {
+    return check.call(ctx) === true;
+  } catch {
+    return false;
+  }
+}
+
 export function cleanSingleLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }

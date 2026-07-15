@@ -189,7 +189,7 @@ Configure only pi-specific exposure in these files:
 - Global: `<Pi agent directory>/mcporter.json`, normally `~/.pi/agent/mcporter.json`.
 - Project: `<cwd>/.pi/mcporter.json`.
 
-Every file must set `"version": 1`. Project scalar values override global values. A project server entry replaces the complete global entry for that server; fields within an entry don't merge. Set a project server entry to `null` to remove its inherited global policy.
+Pi-mcporter reads the project file only after you trust the project in Pi. Every file must set `"version": 1`. Project scalar values override global values. A project server entry replaces the complete global entry for that server; fields within an entry don't merge. Set a project server entry to `null` to remove its inherited global policy.
 
 For example, a global file can define the defaults and common policies:
 

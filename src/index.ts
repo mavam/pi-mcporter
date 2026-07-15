@@ -24,7 +24,11 @@ import {
   matchesToolPattern,
   resolveServerExposure,
 } from "./exposure.js";
-import { cleanSingleLine, textContent } from "./helpers.js";
+import {
+  cleanSingleLine,
+  isProjectContextTrusted,
+  textContent,
+} from "./helpers.js";
 import {
   clampLimit,
   parseCallArgs,
@@ -100,7 +104,12 @@ export default function mcporterExtension(pi: ExtensionAPI) {
             params,
             signal,
             controller.catalogStore,
-            (override) => controller.resolveCallTimeout(override, ctx.cwd),
+            (override) =>
+              controller.resolveCallTimeout(
+                override,
+                ctx.cwd,
+                isProjectContextTrusted(ctx),
+              ),
           );
         }
         default:
@@ -151,6 +160,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
         ctx.cwd,
         isToolActive(pi, "mcporter"),
         nativeTools.getStatus(),
+        isProjectContextTrusted(ctx),
       );
       ctx.ui.notify(status, "info");
     },
@@ -158,7 +168,11 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", (_event, ctx) => {
     void controller
-      .startSession(ctx.cwd, isToolActive(pi, "mcporter"))
+      .startSession(
+        ctx.cwd,
+        isToolActive(pi, "mcporter"),
+        isProjectContextTrusted(ctx),
+      )
       .then((warnings) => notifyWarnings(ctx, warnings))
       .catch((error) =>
         notifyWarnings(ctx, [
@@ -169,6 +183,7 @@ export default function mcporterExtension(pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     const prepared = await controller.prepareTurn({
+      projectTrusted: isProjectContextTrusted(ctx),
       prompt: event.prompt,
       proxyActive: isToolActive(pi, "mcporter"),
       rootDir: ctx.cwd,

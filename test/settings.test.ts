@@ -30,6 +30,30 @@ describe("mcporter settings", () => {
     expect(config.fingerprint).toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it("ignores project settings until the project is trusted", async () => {
+    const files = new Map([
+      [
+        "/agent/mcporter.json",
+        JSON.stringify({ version: 1, defaultExposure: "index" }),
+      ],
+      [
+        "/repo/.pi/mcporter.json",
+        JSON.stringify({ version: 1, defaultExposure: "match" }),
+      ],
+    ]);
+
+    const config = await loadResolvedMcporterConfig({
+      agentDirectory: "/agent",
+      projectTrusted: false,
+      rootDir: "/repo",
+      readFileFn: fileReader(files),
+    });
+
+    expect(config.defaultExposure).toBe("index");
+    expect(config.loadedPaths).toEqual(["/agent/mcporter.json"]);
+    expect(config.projectTrusted).toBe(false);
+  });
+
   it("normalizes the complete schema", () => {
     expect(
       normalizeMcporterSettings({
@@ -116,6 +140,7 @@ describe("mcporter settings", () => {
 
     const config = await loadResolvedMcporterConfig({
       agentDirectory: "/agent",
+      projectTrusted: true,
       rootDir: "/repo",
       readFileFn: fileReader(files),
     });
@@ -185,6 +210,7 @@ describe("mcporter settings", () => {
     await expect(
       loadResolvedMcporterConfig({
         agentDirectory: "/agent",
+        projectTrusted: true,
         rootDir: "/repo",
         readFileFn: fileReader(files),
       }),
