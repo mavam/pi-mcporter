@@ -175,7 +175,9 @@ export function createMcporterController(
       lastExposureState.set(loaded.rootDir, {
         pendingServers: prepared.pendingServers,
         staleServers: prepared.staleServers,
-        warnings: prepared.warnings,
+        // Per-server discovery errors are read live from CatalogService when
+        // status is rendered. Keep only preparation-level failures here.
+        warnings: [],
       });
       // Hidden match messages persist in the conversation, so skip a message
       // whose content is already in context from an earlier turn.
@@ -325,14 +327,20 @@ export function createMcporterController(
     }
 
     const exposureState = lastExposureState.get(loaded.rootDir);
-    if (exposureState?.pendingServers.length) {
-      lines.push(
-        `Discovery still running: ${exposureState.pendingServers.join(", ")}`,
-      );
+    const pendingServers = exposureState?.pendingServers.filter((server) => {
+      const status = catalogService.getServerStatus(server);
+      return status.state === "cold" && !status.error;
+    });
+    if (pendingServers?.length) {
+      lines.push(`Discovery still running: ${pendingServers.join(", ")}`);
     }
-    if (exposureState?.staleServers.length) {
+    const staleServers = exposureState?.staleServers.filter((server) => {
+      const status = catalogService.getServerStatus(server);
+      return status.state === "stale" && !status.error;
+    });
+    if (staleServers?.length) {
       lines.push(
-        `Serving stale metadata while refreshing: ${exposureState.staleServers.join(", ")}`,
+        `Serving stale metadata while refreshing: ${staleServers.join(", ")}`,
       );
     }
     if (exposureState?.warnings.length) {

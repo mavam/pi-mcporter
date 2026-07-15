@@ -318,6 +318,64 @@ describe("createMcporterController", () => {
     ).toBeUndefined();
   });
 
+  it("updates status after background discovery completes", async () => {
+    const fixture = await createSettingsFixture({
+      version: 1,
+      defaultExposure: "match",
+      discoveryTimeoutMs: 100,
+    });
+    let resolveTools: ((tools: ServerToolInfo[]) => void) | undefined;
+    const runtime = createRuntimeStub(
+      () =>
+        new Promise<ServerToolInfo[]>((resolve) => {
+          resolveTools = resolve;
+        }),
+      ["demo"],
+    );
+
+    try {
+      const controller = createController(
+        vi.fn().mockResolvedValue(runtime),
+        fixture.agentDir,
+      );
+      await controller.prepareTurn({
+        prompt: "look up data",
+        proxyActive: true,
+        rootDir: fixture.rootDir,
+      });
+      const nativeStatus = {
+        active: [],
+        diagnostics: [],
+        registered: [],
+      };
+      const pending = await controller.formatStatus(
+        fixture.rootDir,
+        true,
+        nativeStatus,
+      );
+      expect(pending).toContain("Discovery still running: demo");
+
+      resolveTools?.([demoTool("lookup")]);
+      await vi.waitFor(() => {
+        expect(
+          controller.catalogStore.getCachedToolsForServer("demo", {
+            requireSchema: true,
+          }),
+        ).toHaveLength(1);
+      });
+
+      const completed = await controller.formatStatus(
+        fixture.rootDir,
+        true,
+        nativeStatus,
+      );
+      expect(completed).toContain("schema cache fresh");
+      expect(completed).not.toContain("Discovery still running");
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("formats status without starting a cold runtime", async () => {
     const createRuntimeFn = vi.fn();
     const controller = createController(createRuntimeFn);
