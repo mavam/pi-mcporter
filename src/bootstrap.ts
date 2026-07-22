@@ -197,11 +197,9 @@ export function createMcporterController(
         ...(prepared.systemPromptAppend
           ? { systemPromptAppend: prepared.systemPromptAppend }
           : {}),
-        warnings: takeNewWarnings(
-          prepared.warnings.map(
-            (warning) => `MCPorter discovery failed for ${warning}`,
-          ),
-        ),
+        // Individual server failures are status diagnostics. They must not
+        // surface in every session when an ambient MCP import is unavailable.
+        warnings: [],
       };
     } catch (error) {
       const warning = `MCPorter exposure preparation failed: ${toErrorMessage(error)}`;
