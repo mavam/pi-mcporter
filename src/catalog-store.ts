@@ -101,6 +101,7 @@ export class CatalogStore {
         const servers = activeRuntime.listServers();
         const byServer = new Map<string, CatalogTool[]>();
         const tools: CatalogTool[] = [];
+        const serverErrors = new Map<string, string>();
         const warnings: string[] = [];
         const sourceFetchedAts: number[] = [];
         const sourceExpiresAts: number[] = [];
@@ -135,6 +136,7 @@ export class CatalogStore {
             } catch (error) {
               byServer.set(server, []);
               const warning = toErrorMessage(error);
+              serverErrors.set(server, warning);
               warnings.push(`${server}: ${warning}`);
               this.basicServerCatalogCache.delete(server);
             }
@@ -161,6 +163,7 @@ export class CatalogStore {
           servers,
           tools,
           byServer,
+          serverErrors,
           warnings,
         };
 

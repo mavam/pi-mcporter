@@ -11,7 +11,7 @@ export const McporterParameters = Type.Object(
   {
     action: StringEnum(["search", "describe", "call"] as const, {
       description:
-        "Action to run: search tools, describe a tool schema, or call a tool.",
+        "Action to run: search MCP server names and tools, describe a tool schema, or call a tool.",
     }),
     selector: Type.Optional(
       Type.String({
@@ -20,7 +20,10 @@ export const McporterParameters = Type.Object(
       }),
     ),
     query: Type.Optional(
-      Type.String({ description: "Free-text query for search." }),
+      Type.String({
+        description:
+          "MCP server name or natural-language capability query for search, such as 'linear' or 'create issue'.",
+      }),
     ),
     args: Type.Optional(
       Type.Object(

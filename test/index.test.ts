@@ -4,6 +4,7 @@ import { __test__ } from "../src/index.ts";
 const {
   parseCallArgs,
   parseSelector,
+  rankServers,
   rankTools,
   resolveCallTimeoutFromInputs,
   suggest,
@@ -98,7 +99,7 @@ describe("resolveCallTimeoutFromInputs", () => {
   });
 });
 
-describe("suggest and rankTools", () => {
+describe("search ranking", () => {
   const tools: CatalogTool[] = [
     tool("linear", "list_issues", "List issues by status"),
     tool("slack", "post_message", "Post a channel message"),
@@ -112,6 +113,21 @@ describe("suggest and rankTools", () => {
   it("ranks exact selector highest", () => {
     const ranked = rankTools(tools, "linear.list_issues");
     expect(ranked[0]?.selector).toBe("linear.list_issues");
+  });
+
+  it("finds a server name inside a natural-language query", () => {
+    expect(rankServers(["slack", "linear"], "find tools from Linear")).toEqual([
+      "linear",
+    ]);
+  });
+
+  it("ignores model-oriented filler and inflections in tool queries", () => {
+    expect(
+      rankTools(
+        [tool("linear", "create_issue", "Create a new issue")],
+        "find a tool for creating Linear issues",
+      ).map((match) => match.selector),
+    ).toEqual(["linear.create_issue"]);
   });
 
   it("returns no matches for unrelated query", () => {

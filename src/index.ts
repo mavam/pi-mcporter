@@ -37,7 +37,13 @@ import {
 } from "./inputs.js";
 import { NativeToolManager, nativeToolName } from "./native-tools.js";
 import { McporterParameters, type McporterParams } from "./parameters.js";
-import { levenshtein, rankTools, scoreTool, suggest } from "./search.js";
+import {
+  levenshtein,
+  rankServers,
+  rankTools,
+  scoreTool,
+  suggest,
+} from "./search.js";
 import type { ToolDetails } from "./types.js";
 
 const PACKAGE_VERSION: string = await readFile(
@@ -58,7 +64,9 @@ export default function mcporterExtension(pi: ExtensionAPI) {
     label: "MCPorter",
     description:
       `Discover and call MCP tools through MCPorter using one stable proxy tool. ` +
-      `Use action='call' directly when you already know the selector, action='describe' when you need schema details, and action='search' only to find unknown tools. ` +
+      `When a selector is unknown, use action='search' with an MCP server name or a capability phrase; known server names remain discoverable when authentication or connectivity prevents tool listing. ` +
+      `Server names are not callable selectors: choose a returned server.tool value, use action='describe' for its schema, then action='call'. ` +
+      `If you already know the selector and arguments, use action='call' directly. ` +
       `Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} and saved to a temp file when truncated.`,
     parameters: McporterParameters,
 
@@ -408,6 +416,7 @@ export const __test__ = {
   levenshtein,
   parseCallArgs,
   parseSelector,
+  rankServers,
   rankTools,
   resolveCallTimeoutFromInputs,
   isMcporterExposure,
