@@ -44,7 +44,7 @@ export const McporterParameters = Type.Object(
       Type.Integer({
         minimum: 1,
         maximum: MAX_SEARCH_LIMIT,
-        description: `Maximum number of search matches (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
+        description: `Maximum number of tool matches (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}); up to 3 matching servers are shown separately.`,
       }),
     ),
     timeoutMs: Type.Optional(

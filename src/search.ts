@@ -1,48 +1,6 @@
 import type { CatalogTool } from "./types.js";
 
-const SEARCH_STOP_WORDS = new Set([
-  "a",
-  "an",
-  "and",
-  "any",
-  "are",
-  "available",
-  "can",
-  "could",
-  "do",
-  "does",
-  "find",
-  "for",
-  "from",
-  "i",
-  "in",
-  "is",
-  "mcp",
-  "me",
-  "my",
-  "need",
-  "of",
-  "on",
-  "or",
-  "please",
-  "server",
-  "servers",
-  "show",
-  "that",
-  "the",
-  "there",
-  "to",
-  "tool",
-  "tools",
-  "use",
-  "using",
-  "via",
-  "want",
-  "what",
-  "which",
-  "with",
-  "would",
-]);
+const SEARCH_WORD_SEPARATOR = /[^\p{L}\p{N}]+/u;
 
 export function rankServers(servers: string[], query: string): string[] {
   const normalized = query.trim().toLowerCase();
@@ -50,7 +8,8 @@ export function rankServers(servers: string[], query: string): string[] {
     return [...servers].sort((a, b) => a.localeCompare(b));
   }
 
-  const tokens = searchTokens(normalized);
+  const catalogTerms = catalogTokens(servers);
+  const tokens = relevantSearchTokens(normalized, catalogTerms);
   return servers
     .map((server) => ({
       server,
@@ -67,7 +26,10 @@ export function rankTools(tools: CatalogTool[], query: string): CatalogTool[] {
     return [...tools];
   }
 
-  const tokens = searchTokens(normalized);
+  const catalogTerms = catalogTokens(
+    tools.flatMap((tool) => [tool.selector, tool.description ?? ""]),
+  );
+  const tokens = relevantSearchTokens(normalized, catalogTerms);
   return tools
     .map((tool) => ({ tool, score: scoreTool(tool, normalized, tokens) }))
     .filter((entry) => entry.score > 0)
@@ -98,24 +60,19 @@ export function scoreTool(
   if (selector.includes(normalizedQuery)) score += 180;
   if (description.includes(normalizedQuery)) score += 80;
 
-  const toolWords = toolName.split(/[^a-z0-9]+/).filter(Boolean);
+  const selectorTerms = catalogTokens([selector]);
+  const descriptionTerms = catalogTokens([description]);
   let matchedTokens = 0;
   for (const token of tokens) {
-    if (selector.includes(token)) {
-      score += 45;
+    const selectorMatch = bestTokenMatch(token, selectorTerms);
+    if (selectorMatch) {
+      score += selectorMatch === "fuzzy" ? 6 : 45;
       matchedTokens += 1;
       continue;
     }
-    if (description.includes(token)) {
-      score += 20;
-      matchedTokens += 1;
-      continue;
-    }
-    if (
-      token.length >= 5 &&
-      toolWords.some((word) => levenshtein(token, word) <= 2)
-    ) {
-      score += 6;
+    const descriptionMatch = bestTokenMatch(token, descriptionTerms);
+    if (descriptionMatch) {
+      score += descriptionMatch === "fuzzy" ? 6 : 20;
       matchedTokens += 1;
     }
   }
@@ -131,28 +88,70 @@ function scoreServer(
 ): number {
   const normalizedServer = server.toLowerCase();
   if (normalizedServer === normalizedQuery) return 1000;
+  if (tokens.length === 0) return 0;
 
   let score = 0;
   if (normalizedServer.startsWith(normalizedQuery)) score += 500;
   if (normalizedServer.includes(normalizedQuery)) score += 300;
 
+  const serverTerms = catalogTokens([normalizedServer]);
   for (const token of tokens) {
-    if (normalizedServer === token) score += 250;
-    else if (normalizedServer.includes(token)) score += 100;
-    else if (token.length >= 5 && levenshtein(token, normalizedServer) <= 2) {
-      score += 20;
-    }
+    const match = bestTokenMatch(token, serverTerms);
+    if (match === "exact") score += 250;
+    else if (match === "prefix") score += 100;
+    else if (match === "fuzzy") score += 20;
   }
 
   return score;
 }
 
-function searchTokens(query: string): string[] {
-  return query
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 0 && !SEARCH_STOP_WORDS.has(token))
-    .map(stemSearchToken)
-    .filter((token, index, tokens) => tokens.indexOf(token) === index);
+function relevantSearchTokens(
+  query: string,
+  catalogTerms: Set<string>,
+): string[] {
+  return searchTokens(query, catalogTerms).filter((token) =>
+    bestTokenMatch(token, catalogTerms),
+  );
+}
+
+function bestTokenMatch(
+  token: string,
+  catalogTerms: Set<string>,
+): "exact" | "prefix" | "fuzzy" | undefined {
+  if (catalogTerms.has(token)) return "exact";
+
+  for (const term of catalogTerms) {
+    if (token.length >= 4 && term.startsWith(token)) return "prefix";
+  }
+  if (token.length >= 5) {
+    for (const term of catalogTerms) {
+      if (levenshtein(token, term) <= 2) return "fuzzy";
+    }
+  }
+
+  return undefined;
+}
+
+function catalogTokens(values: string[]): Set<string> {
+  return new Set(
+    values.flatMap((value) =>
+      value.toLowerCase().split(SEARCH_WORD_SEPARATOR).filter(Boolean),
+    ),
+  );
+}
+
+function searchTokens(query: string, catalogTerms: Set<string>): string[] {
+  return (
+    query
+      .split(SEARCH_WORD_SEPARATOR)
+      .filter(Boolean)
+      // Preserve exact catalog terms so proper nouns ending in "s", such as
+      // Jenkins and Kubernetes, keep their exact-token ranking bonus.
+      .map((token) =>
+        catalogTerms.has(token) ? token : stemSearchToken(token),
+      )
+      .filter((token, index, tokens) => tokens.indexOf(token) === index)
+  );
 }
 
 function stemSearchToken(token: string): string {
