@@ -1,6 +1,6 @@
 {
   "name": "pi-mcporter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Configurable MCPorter bridge extension for pi and Model Context Protocol (MCP) servers.",
   "type": "module",
   "files": [

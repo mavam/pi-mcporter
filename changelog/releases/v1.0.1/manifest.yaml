@@ -1,0 +1,9 @@
+created: 2026-07-22
+title: Quiet background discovery failures
+intro: >-
+  Background MCP schema discovery failures no longer interrupt every Pi session with
+  warning notifications. Unavailable server details remain accessible through /mcporter
+  status while healthy integrations continue working.
+source:
+  mode: sync-stable-queue
+  previous_stable: v1.0.0
