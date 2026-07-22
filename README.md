@@ -18,7 +18,10 @@ Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/pack
 
 ## 📋 Prerequisites
 
-You need [MCPorter](https://github.com/openclaw/mcporter) installed and configured with at least one MCP server:
+You need:
+
+- Node.js 24 or newer
+- [MCPorter](https://github.com/openclaw/mcporter) installed and configured with at least one MCP server
 
 ```bash
 npm install -g mcporter
