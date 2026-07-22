@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  format:
+  checks:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
@@ -26,3 +26,12 @@ jobs:
 
       - name: Check formatting
         run: npm run format:check
+
+      - name: Check types
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build package
+        run: npm run build

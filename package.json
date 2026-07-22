@@ -26,7 +26,7 @@
     "url": "git+https://github.com/mavam/pi-mcporter.git"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24"
   },
   "publishConfig": {
     "access": "public"
@@ -47,7 +47,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "mcporter": "^0.7.3"
+    "mcporter": "^0.12.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
