@@ -1,12 +1,73 @@
 import type { CatalogTool } from "./types.js";
 
+const SEARCH_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "any",
+  "are",
+  "available",
+  "can",
+  "could",
+  "do",
+  "does",
+  "find",
+  "for",
+  "from",
+  "i",
+  "in",
+  "is",
+  "mcp",
+  "me",
+  "my",
+  "need",
+  "of",
+  "on",
+  "or",
+  "please",
+  "server",
+  "servers",
+  "show",
+  "that",
+  "the",
+  "there",
+  "to",
+  "tool",
+  "tools",
+  "use",
+  "using",
+  "via",
+  "want",
+  "what",
+  "which",
+  "with",
+  "would",
+]);
+
+export function rankServers(servers: string[], query: string): string[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return [...servers].sort((a, b) => a.localeCompare(b));
+  }
+
+  const tokens = searchTokens(normalized);
+  return servers
+    .map((server) => ({
+      server,
+      score: scoreServer(server, normalized, tokens),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.server.localeCompare(b.server))
+    .map((entry) => entry.server);
+}
+
 export function rankTools(tools: CatalogTool[], query: string): CatalogTool[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) {
     return [...tools];
   }
 
-  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const tokens = searchTokens(normalized);
   return tools
     .map((tool) => ({ tool, score: scoreTool(tool, normalized, tokens) }))
     .filter((entry) => entry.score > 0)
@@ -37,24 +98,74 @@ export function scoreTool(
   if (selector.includes(normalizedQuery)) score += 180;
   if (description.includes(normalizedQuery)) score += 80;
 
+  const toolWords = toolName.split(/[^a-z0-9]+/).filter(Boolean);
+  let matchedTokens = 0;
   for (const token of tokens) {
     if (selector.includes(token)) {
       score += 45;
+      matchedTokens += 1;
       continue;
     }
     if (description.includes(token)) {
       score += 20;
+      matchedTokens += 1;
       continue;
     }
-    const distance = levenshtein(token, toolName);
-    if (distance <= 2) {
-      score += 8 - distance * 2;
-      continue;
+    if (
+      token.length >= 5 &&
+      toolWords.some((word) => levenshtein(token, word) <= 2)
+    ) {
+      score += 6;
+      matchedTokens += 1;
     }
-    return 0;
+  }
+
+  const requiredMatches = Math.max(1, Math.ceil(tokens.length * 0.6));
+  return matchedTokens >= requiredMatches ? score : 0;
+}
+
+function scoreServer(
+  server: string,
+  normalizedQuery: string,
+  tokens: string[],
+): number {
+  const normalizedServer = server.toLowerCase();
+  if (normalizedServer === normalizedQuery) return 1000;
+
+  let score = 0;
+  if (normalizedServer.startsWith(normalizedQuery)) score += 500;
+  if (normalizedServer.includes(normalizedQuery)) score += 300;
+
+  for (const token of tokens) {
+    if (normalizedServer === token) score += 250;
+    else if (normalizedServer.includes(token)) score += 100;
+    else if (token.length >= 5 && levenshtein(token, normalizedServer) <= 2) {
+      score += 20;
+    }
   }
 
   return score;
+}
+
+function searchTokens(query: string): string[] {
+  return query
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 0 && !SEARCH_STOP_WORDS.has(token))
+    .map(stemSearchToken)
+    .filter((token, index, tokens) => tokens.indexOf(token) === index);
+}
+
+function stemSearchToken(token: string): string {
+  if (token.length > 5 && token.endsWith("ing")) {
+    return token.slice(0, -3);
+  }
+  if (token.length > 4 && token.endsWith("ed")) {
+    return token.slice(0, -2);
+  }
+  if (token.length > 4 && token.endsWith("s") && !token.endsWith("ss")) {
+    return token.slice(0, -1);
+  }
+  return token;
 }
 
 export function suggest(

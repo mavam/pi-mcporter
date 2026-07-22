@@ -16,6 +16,7 @@ export interface CatalogSnapshot {
   servers: string[];
   tools: CatalogTool[];
   byServer: Map<string, CatalogTool[]>;
+  serverErrors: Map<string, string>;
   warnings: string[];
 }
 
@@ -29,6 +30,8 @@ export interface ToolDetails {
   action: "search" | "describe" | "call";
   selector?: string;
   resultCount?: number;
+  serverResultCount?: number;
+  toolResultCount?: number;
   cacheAgeMs?: number;
   timeoutMs?: number;
   warnings?: string[];

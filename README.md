@@ -58,20 +58,21 @@ pi
 
 The `mcporter` tool has three actions that map to a natural discovery → execution workflow.
 
-### `search`: find tools by keyword
+### `search`: find servers and tools
 
-Use when you don't know the exact server or tool name.
+Use a known MCP server name or a natural-language capability phrase when you don't know the exact tool selector:
 
 ```json
-{ "action": "search", "query": "linear issue", "limit": 5 }
+{ "action": "search", "query": "linear", "limit": 5 }
 ```
 
-Returns matching selectors with short descriptions:
+```json
+{ "action": "search", "query": "find a tool for creating Linear issues", "limit": 5 }
+```
 
-```
-linear.create_issue — Create a new issue in a Linear team
-linear.list_issues  — List issues matching a filter
-```
+Search returns matching server names and `server.tool` selectors with short descriptions. A server name confirms that MCPorter knows the integration, but it isn't callable by itself. Choose a tool selector from the results, then use `describe` and `call`.
+
+If authentication or connectivity prevents pi-mcporter from loading a server's tools, the server still appears as a known MCP server. The result identifies the unavailable metadata and suggests authentication or connectivity recovery instead of reporting that the server doesn't exist.
 
 ### `describe`: get the full schema for a tool
 
@@ -155,7 +156,7 @@ Tool name: `mcporter`
 
 - `action`: `"search" | "describe" | "call"`
 - `selector?`: `"server.tool"` (required for `describe` and `call`)
-- `query?`: free-text query for `search`
+- `query?`: MCP server name or natural-language capability query for `search`
 - `limit?`: result limit (default 20, max 100)
 - `args?`: object arguments for `call`
 - `argsJson?`: JSON-object-string fallback for `call`

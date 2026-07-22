@@ -255,7 +255,7 @@ describe("mcporter renderer", () => {
 });
 
 describe("search output formatting", () => {
-  it("formats matching tools as markdown bullets", async () => {
+  it("returns a known server alongside its matching tools", async () => {
     const runtime = createRuntimeStub(
       async () => [
         demoTool("linear", "list_issues", undefined, "List issues by status"),
@@ -265,14 +265,91 @@ describe("search output formatting", () => {
 
     const result = await handleSearchAction(
       runtime,
-      { action: "search", query: "issues" },
+      { action: "search", query: "linear" },
       undefined,
       new CatalogStore(),
     );
 
-    const text =
-      result.content[0]?.type === "text" ? result.content[0].text : "";
+    const text = extractResultText(result);
+    expect(text).toContain(
+      "Found 1 server match and 1 tool match for 'linear' across 1 known MCP server.",
+    );
+    expect(text).toContain("- `linear` — 1 tool available");
     expect(text).toContain("- `linear.list_issues`: List issues by status");
+    expect(text).toContain("choose a `server.tool` selector");
+    expect(result.details).toMatchObject({
+      resultCount: 2,
+      serverResultCount: 1,
+      toolResultCount: 1,
+    });
+  });
+
+  it("finds tools from a natural-language capability query", async () => {
+    const runtime = createRuntimeStub(
+      async () => [
+        demoTool("linear", "create_issue", undefined, "Create a new issue"),
+        demoTool("linear", "list_teams", undefined, "List teams"),
+      ],
+      ["linear"],
+    );
+
+    const result = await handleSearchAction(
+      runtime,
+      {
+        action: "search",
+        query: "find a tool for creating Linear issues",
+      },
+      undefined,
+      new CatalogStore(),
+    );
+
+    const text = extractResultText(result);
+    expect(text).toContain("- `linear.create_issue`: Create a new issue");
+    expect(text).not.toContain("`linear.list_teams`");
+  });
+
+  it("keeps an authentication-failed server discoverable", async () => {
+    const runtime = createRuntimeStub(async () => {
+      throw new Error("Authentication required");
+    }, ["linear"]);
+
+    const result = await handleSearchAction(
+      runtime,
+      { action: "search", query: "linear" },
+      undefined,
+      new CatalogStore(),
+    );
+
+    const text = extractResultText(result);
+    expect(text).toContain(
+      "Found 1 server match and 0 tool matches for 'linear'",
+    );
+    expect(text).toContain(
+      "- `linear` — known MCP server; tool metadata unavailable (authentication required)",
+    );
+    expect(text).toContain(
+      "authenticate `linear` outside this tool with `mcporter auth <server>`",
+    );
+    expect(text).toContain("not a callable selector");
+  });
+
+  it("keeps an offline server discoverable", async () => {
+    const runtime = createRuntimeStub(async () => {
+      throw new Error("ECONNREFUSED");
+    }, ["jira"]);
+
+    const result = await handleSearchAction(
+      runtime,
+      { action: "search", query: "jira" },
+      undefined,
+      new CatalogStore(),
+    );
+
+    const text = extractResultText(result);
+    expect(text).toContain(
+      "- `jira` — known MCP server; tool metadata unavailable (offline or unreachable)",
+    );
+    expect(text).toContain("restore connectivity for `jira`");
   });
 });
 
@@ -415,6 +492,13 @@ describe("exposure resolution", () => {
     expect(__test__.matchesToolPattern("get_12", "get_?")).toBe(false);
   });
 });
+
+function extractResultText(
+  result: Awaited<ReturnType<typeof handleSearchAction>>,
+): string {
+  const content = result.content[0];
+  return content?.type === "text" ? content.text : "";
+}
 
 function demoTool(
   server: string,
