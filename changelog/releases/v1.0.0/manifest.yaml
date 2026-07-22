@@ -1,0 +1,10 @@
+created: 2026-07-22
+title: Configurable MCP tool exposure
+intro: >-
+  pi-mcporter introduces strict, layered exposure policies for choosing how MCP tools
+  reach the model while moving connectivity and credentials fully into MCPorter. It
+  also restores current OAuth compatibility and makes server discovery reliable when
+  tool metadata is unavailable.
+source:
+  mode: sync-stable-queue
+  previous_stable: v0.5.0
