@@ -23,7 +23,6 @@ export interface PreparedPromptCatalog {
   pendingServers: string[];
   staleServers: string[];
   systemPromptAppend?: string;
-  warnings: string[];
 }
 
 export class PromptCatalogProvider {
@@ -101,7 +100,6 @@ export class PromptCatalogProvider {
       staleServers: prepared.staleServers,
       systemPromptAppend: buildServerIndexAppend(indexServers),
       matchMessage: buildMatchedToolsMessage(matchedTools),
-      warnings: prepared.warnings,
     };
   }
 }
@@ -251,6 +249,5 @@ function emptyPreparedCatalog(): PreparedPromptCatalog {
     nativeTools: [],
     pendingServers: [],
     staleServers: [],
-    warnings: [],
   };
 }
