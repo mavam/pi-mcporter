@@ -256,7 +256,7 @@ Tool output follows pi's native expand/collapse behavior:
 ## 🧯 Troubleshooting
 
 - **Unknown server/tool**: run `npx mcporter list` and `npx mcporter list <server>` to verify names.
-- **Auth issues**: run `npx mcporter auth <server>`.
+- **Auth issues**: run `npx mcporter auth <server>`. The CLI and pi-mcporter share MCPorter's configuration and credential vault, but Pi uses the MCPorter library version installed with the extension. If the CLI succeeds while Pi returns an authorization error, update pi-mcporter so both use compatible OAuth handling.
 - **Slow calls**: Increase `callTimeoutMs` in a pi-mcporter configuration file or override `timeoutMs` per proxy call.
 - **Missing matched or native tools**: Run `/mcporter status` to check filters, discovery progress, and schema errors.
 - **Invalid exposure configuration**: Fix the reported error. Version 1 rejects unknown and legacy keys, including `mode`, `serverModes`, and top-level `timeoutMs`.
