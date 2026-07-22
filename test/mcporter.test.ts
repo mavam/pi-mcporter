@@ -284,6 +284,32 @@ describe("search output formatting", () => {
     });
   });
 
+  it("does not let server matches consume the tool result limit", async () => {
+    const runtime = createRuntimeStub(
+      async () => [
+        demoTool("linear", "list_issues", undefined, "List issues by status"),
+      ],
+      ["linear"],
+    );
+
+    const result = await handleSearchAction(
+      runtime,
+      { action: "search", query: "linear", limit: 1 },
+      undefined,
+      new CatalogStore(),
+    );
+
+    const text = extractResultText(result);
+    expect(text).toContain("- `linear` — 1 tool available");
+    expect(text).toContain("- `linear.list_issues`: List issues by status");
+    expect(text).toContain("choose a `server.tool` selector");
+    expect(result.details).toMatchObject({
+      resultCount: 2,
+      serverResultCount: 1,
+      toolResultCount: 1,
+    });
+  });
+
   it("finds tools from a natural-language capability query", async () => {
     const runtime = createRuntimeStub(
       async () => [
@@ -328,9 +354,12 @@ describe("search output formatting", () => {
       "- `linear` — known MCP server; tool metadata unavailable (authentication required)",
     );
     expect(text).toContain(
-      "authenticate `linear` outside this tool with `mcporter auth <server>`",
+      "authenticate `linear` outside this tool with `mcporter auth linear`",
     );
     expect(text).toContain("not a callable selector");
+    expect(text).toContain(
+      "then retry search.\n\nTool metadata is unavailable",
+    );
   });
 
   it("keeps an offline server discoverable", async () => {

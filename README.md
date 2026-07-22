@@ -157,7 +157,7 @@ Tool name: `mcporter`
 - `action`: `"search" | "describe" | "call"`
 - `selector?`: `"server.tool"` (required for `describe` and `call`)
 - `query?`: MCP server name or natural-language capability query for `search`
-- `limit?`: result limit (default 20, max 100)
+- `limit?`: tool result limit (default 20, max 100); search also shows up to 3 matching servers
 - `args?`: object arguments for `call`
 - `argsJson?`: JSON-object-string fallback for `call`
 - `timeoutMs?`: per-call timeout override

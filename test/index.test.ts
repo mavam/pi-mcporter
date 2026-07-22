@@ -121,13 +121,51 @@ describe("search ranking", () => {
     ]);
   });
 
-  it("ignores model-oriented filler and inflections in tool queries", () => {
+  it("ignores arbitrary filler and inflections in tool queries", () => {
     expect(
       rankTools(
         [tool("linear", "create_issue", "Create a new issue")],
-        "find a tool for creating Linear issues",
+        "can you help me with creating an issue",
       ).map((match) => match.selector),
     ).toEqual(["linear.create_issue"]);
+  });
+
+  it("keeps meaningful words that previously looked like filler", () => {
+    expect(
+      rankTools(
+        [tool("demo", "show_available_tools", "Show available tools")],
+        "show available tools",
+      ).map((match) => match.selector),
+    ).toEqual(["demo.show_available_tools"]);
+  });
+
+  it("filters non-English filler using the catalog vocabulary", () => {
+    expect(
+      rankTools(
+        [tool("linear", "create_issue", "Создать задачу")],
+        "пожалуйста создать задачу",
+      ).map((match) => match.selector),
+    ).toEqual(["linear.create_issue"]);
+  });
+
+  it("preserves proper nouns ending in s while ranking servers", () => {
+    expect(
+      rankServers(["jenkin", "jenkins"], "find tools from Jenkins"),
+    ).toEqual(["jenkins", "jenkin"]);
+  });
+
+  it("rejects filler that only occurs inside catalog words", () => {
+    expect(rankServers(["linear", "notion"], "what can I do")).toEqual([]);
+    expect(rankTools([tool("demo", "scan_data")], "can")).toEqual([]);
+  });
+
+  it("keeps fuzzy server and tool matches", () => {
+    expect(rankServers(["linear", "notion"], "linar")).toEqual(["linear"]);
+    expect(
+      rankTools([tool("slack", "post_message")], "mesage").map(
+        (match) => match.selector,
+      ),
+    ).toEqual(["slack.post_message"]);
   });
 
   it("returns no matches for unrelated query", () => {

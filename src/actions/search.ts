@@ -8,6 +8,8 @@ import type { McporterParams } from "../parameters.js";
 import { rankServers, rankTools } from "../search.js";
 import type { ToolDetails } from "../types.js";
 
+const MAX_SERVER_MATCHES = 3;
+
 export async function handleSearchAction(
   activeRuntime: Runtime,
   params: McporterParams,
@@ -22,12 +24,9 @@ export async function handleSearchAction(
   const limit = clampLimit(params.limit ?? DEFAULT_SEARCH_LIMIT);
   const query = params.query?.trim() ?? "";
   const serverMatches = query
-    ? rankServers(catalog.servers, query).slice(0, limit)
+    ? rankServers(catalog.servers, query).slice(0, MAX_SERVER_MATCHES)
     : [];
-  const toolMatches = rankTools(catalog.tools, query).slice(
-    0,
-    Math.max(0, limit - serverMatches.length),
-  );
+  const toolMatches = rankTools(catalog.tools, query).slice(0, limit);
 
   const lines: string[] = [];
   const serverCount = catalog.servers.length;
@@ -99,6 +98,7 @@ export async function handleSearchAction(
 
   if (catalog.warnings.length > 0) {
     lines.push(
+      "",
       `Tool metadata is unavailable for ${formatCount(catalog.warnings.length, "known server")} due to authentication, connectivity, or discovery errors.`,
     );
   }
@@ -168,7 +168,7 @@ function recoveryHints(
 
   for (const server of authServers) {
     lines.push(
-      `Recovery: authenticate \`${formatMarkdownCodeSpan(server)}\` outside this tool with \`mcporter auth <server>\`, then retry search.`,
+      `Recovery: authenticate \`${formatMarkdownCodeSpan(server)}\` outside this tool with \`mcporter auth ${formatMarkdownCodeSpan(server)}\`, then retry search.`,
     );
   }
   if (offlineServers.length > 0) {
