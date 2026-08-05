@@ -1,0 +1,7 @@
+created: 2026-08-05
+title: Secure MCP dependency chain
+intro: "This release secures Pi MCPorter\u2019s MCP transport dependency chain and\
+  \ removes the vulnerable Hono runtime from production installations."
+source:
+  mode: sync-stable-queue
+  previous_stable: v1.0.1
