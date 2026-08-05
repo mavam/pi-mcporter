@@ -47,17 +47,17 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "mcporter": "^0.12.3"
+    "mcporter": "^0.13.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.6",
+    "@biomejs/biome": "^2.5.7",
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^24.13.3",
+    "esbuild": "^0.28.1",
     "typebox": "*",
-    "@types/node": "^24.3.0",
-    "esbuild": "^0.25.10",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
