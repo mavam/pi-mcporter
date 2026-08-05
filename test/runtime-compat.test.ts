@@ -16,7 +16,7 @@ type PackageLock = {
   >;
 };
 
-const MINIMUM_MCPORTER_VERSION = [0, 12, 3] as const;
+const MINIMUM_MCPORTER_VERSION = [0, 13, 0] as const;
 
 function parseVersion(version: string | undefined): [number, number, number] {
   const match = version?.match(/\d+\.\d+\.\d+/);
@@ -41,7 +41,7 @@ function isAtLeast(
 }
 
 describe("MCPorter runtime compatibility", () => {
-  it("requires the OAuth-compatible MCPorter release line", async () => {
+  it("requires the secure MCPorter release line", async () => {
     const manifest = JSON.parse(
       await readFile(new URL("../package.json", import.meta.url), "utf8"),
     ) as PackageManifest;
