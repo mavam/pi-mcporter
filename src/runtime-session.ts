@@ -1,5 +1,6 @@
 import { createRuntime, type Runtime } from "mcporter";
 import { normalizeRootDir } from "./helpers.js";
+import { silenceMcporterStdioLogs } from "./mcporter-stdio-logging.js";
 
 class StaleRuntimeSessionError extends Error {
   constructor() {
@@ -51,6 +52,7 @@ export class RuntimeSession {
       }
 
       const generation = this.generation;
+      await silenceMcporterStdioLogs();
       const created = await this.createRuntimeFn({
         rootDir: key,
         clientInfo: {
