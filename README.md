@@ -1,6 +1,8 @@
 # 🧳 pi-mcporter
 
-Use MCP tools from [pi](https://github.com/earendil-works/pi-mono/tree/main/packages/coding-agent) through a stable `mcporter` proxy with optional native tool exposure, powered by [MCPorter](https://github.com/openclaw/mcporter).
+Use MCP tools from [Pi](https://pi.dev) through a stable `mcporter` proxy with
+optional native tool exposure, powered by
+[MCPorter](https://github.com/openclaw/mcporter).
 
 ## 🧠 Philosophy: CLI > MCP
 
@@ -267,12 +269,6 @@ Tool output follows pi's native expand/collapse behavior:
 - **Invalid exposure configuration**: Fix the reported error. Version 1 rejects unknown and legacy keys, including `mode`, `serverModes`, and top-level `timeoutMs`.
 - **Config not found**: create `~/.mcporter/mcporter.json` or `config/mcporter.json`, or export `MCPORTER_CONFIG=<path>`.
 - **Truncated output**: the response includes a temp file path with full output.
-
-## 🧹 Uninstall
-
-```sh
-pi remove npm:pi-mcporter
-```
 
 ## 📄 License
 
